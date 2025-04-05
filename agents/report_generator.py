@@ -1,11 +1,14 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from io import BytesIO
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import base64
+import tempfile
+import os
 
 class ReportGeneratorAgent:
     def __init__(self):
@@ -83,6 +86,13 @@ class ReportGeneratorAgent:
             report_date = st.date_input("Report Date")
             analyst_name = st.text_input("Analyst Name", "Marine Performance Team")
             
+            # Options for report content
+            st.subheader("Report Content Options")
+            include_hull = st.checkbox("Include Hull Performance Section", value=True)
+            include_speed = st.checkbox("Include Speed-Consumption Section", value=True)
+            include_emissions = st.checkbox("Include Emissions Section", value=False)
+            include_machinery = st.checkbox("Include Machinery Section", value=False)
+            
             # Generate report button
             if st.button("Generate DOCX Report"):
                 with st.spinner("Generating report..."):
@@ -92,7 +102,13 @@ class ReportGeneratorAgent:
                         report_date=report_date,
                         analyst_name=analyst_name,
                         hull_metrics=hull_metrics,
-                        speed_metrics=speed_metrics
+                        speed_metrics=speed_metrics,
+                        options={
+                            'include_hull': include_hull,
+                            'include_speed': include_speed,
+                            'include_emissions': include_emissions,
+                            'include_machinery': include_machinery
+                        }
                     )
                     
                     # Create download button
@@ -276,7 +292,7 @@ class ReportGeneratorAgent:
                     name='Polynomial Fit'
                 ))
             except Exception as e:
-                st.warning(f"Could not generate trend line: {e}")
+                print(f"Could not generate trend line: {e}")
         
         # Update layout
         fig.update_layout(
@@ -291,84 +307,219 @@ class ReportGeneratorAgent:
         
         return fig
     
-    def _generate_docx_report(self, vessel_name, report_date, analyst_name, hull_metrics, speed_metrics):
+    def _save_chart_as_image(self, fig):
+        # Create a temporary file to save the image
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp:
+            # Save the figure as a PNG file
+            fig.write_image(temp.name, scale=2)
+            return temp.name
+    
+    def _generate_docx_report(self, vessel_name, report_date, analyst_name, hull_metrics, speed_metrics, options):
         # Create a new Document
         doc = Document()
         
         # Add title page
         doc.add_heading('Vessel Performance Summary', 0)
-        doc.add_paragraph(f'Vessel Name: {vessel_name.upper()}')
-        doc.add_paragraph(f'Prepared On: {report_date}')
-        doc.add_paragraph(f'Prepared By: {analyst_name}')
         
-        # Add horizontal line
-        doc.add_paragraph('_' * 80)
-        
-        # Hull & Propeller Performance section
-        doc.add_heading('Hull & Propeller Performance', 1)
-        
-        # Create table for hull performance data
-        table = doc.add_table(rows=5, cols=2)
+        # Add a table for vessel information
+        table = doc.add_table(rows=3, cols=2)
         table.style = 'Table Grid'
         
-        # Add data to table
         rows = table.rows
-        rows[0].cells[0].text = 'Additional Power Consumption'
-        rows[0].cells[1].text = f"{hull_metrics['power_loss']:.1f} %"
+        rows[0].cells[0].text = 'Vessel Name:'
+        rows[0].cells[1].text = vessel_name.upper()
         
-        rows[1].cells[0].text = 'Potential Fuel Savings from Hull Cleaning & Propeller Polishing'
-        rows[1].cells[1].text = f"{hull_metrics['fuel_savings']:.1f} MT/D"
+        rows[1].cells[0].text = 'Prepared On:'
+        rows[1].cells[1].text = str(report_date)
         
-        rows[2].cells[0].text = 'Hull & Propeller Condition'
-        rows[2].cells[1].text = hull_metrics['condition']
+        rows[2].cells[0].text = 'Prepared By:'
+        rows[2].cells[1].text = analyst_name
         
-        rows[3].cells[0].text = 'Recommendation'
-        rows[3].cells[1].text = hull_metrics['recommendation']
+        doc.add_paragraph()
+        doc.add_paragraph('_' * 80)
+        doc.add_paragraph()
         
-        rows[4].cells[0].text = 'Forecasted Date of Hull cleaning'
-        rows[4].cells[1].text = '-'
+        # Create summary table at the top
+        summary_table = doc.add_table(rows=3, cols=6)
+        summary_table.style = 'Table Grid'
+        
+        # Set headers for the top summary table
+        header_row = summary_table.rows[0].cells
+        header_row[0].text = "Hull & Propeller"
+        header_row[1].text = "Average"
+        header_row[2].text = "Machinery"
+        header_row[3].text = "Good"
+        header_row[4].text = "Emissions"
+        header_row[5].text = "CII Rating - A"
+        
+        # Set content for the middle row (placeholder for icons)
+        middle_row = summary_table.rows[1].cells
+        middle_row[0].text = "[Hull Icon]"
+        middle_row[1].text = f"Potential Savings\n{hull_metrics['fuel_savings']:.1f} MT/D"
+        middle_row[2].text = "[Machinery Icon]"
+        middle_row[3].text = "Potential Savings\n-"
+        middle_row[4].text = "[Emissions Icon]"
+        middle_row[5].text = "Potential Improvement\n-"
         
         doc.add_paragraph()
         
-        # Hull Performance Analysis section
-        doc.add_heading('Hull & Propeller Performance Analysis', 1)
-        doc.add_paragraph('Chart image will be inserted here in the final report')
+        # Hull & Propeller Performance section (if enabled)
+        if options['include_hull']:
+            doc.add_heading('Hull & Propeller Performance', 1)
+            
+            # Create table for hull performance data
+            hull_table = doc.add_table(rows=5, cols=2)
+            hull_table.style = 'Table Grid'
+            
+            # Add data to table
+            rows = hull_table.rows
+            rows[0].cells[0].text = 'Additional Power Consumption'
+            rows[0].cells[1].text = f"{hull_metrics['power_loss']:.1f} %"
+            
+            rows[1].cells[0].text = 'Potential Fuel Savings from Hull Cleaning & Propeller Polishing'
+            rows[1].cells[1].text = f"{hull_metrics['fuel_savings']:.1f} MT/D"
+            
+            rows[2].cells[0].text = 'Hull & Propeller Condition'
+            rows[2].cells[1].text = hull_metrics['condition']
+            
+            rows[3].cells[0].text = 'Recommendation'
+            rows[3].cells[1].text = hull_metrics['recommendation']
+            
+            rows[4].cells[0].text = 'Forecasted Date of Hull cleaning'
+            rows[4].cells[1].text = '-'
+            
+            doc.add_paragraph()
+            
+            # Hull Performance Analysis section
+            doc.add_heading('Hull & Propeller Performance Analysis', 1)
+            
+            # Add hull performance chart if available
+            if 'hull_chart' in hull_metrics and hull_metrics['hull_chart'] is not None:
+                try:
+                    # Save chart as image
+                    chart_path = self._save_chart_as_image(hull_metrics['hull_chart'])
+                    # Add image to document
+                    doc.add_picture(chart_path, width=Inches(6.0))
+                    # Delete temporary file
+                    os.unlink(chart_path)
+                except Exception as e:
+                    doc.add_paragraph(f"[Chart image could not be generated: {str(e)}]")
+            else:
+                doc.add_paragraph("[Hull performance chart will be inserted here]")
+            
+            # Add notes about hull performance
+            doc.add_heading('Notes:', 2)
+            notes = doc.add_paragraph()
+            notes.add_run('- ').bold = True
+            notes.add_run(f"The vessel shows {hull_metrics['power_loss']:.1f}% additional power consumption, indicating a {hull_metrics['condition'].lower()} hull condition.")
+            
+            if hull_metrics['fuel_savings'] > 0:
+                notes2 = doc.add_paragraph()
+                notes2.add_run('- ').bold = True
+                notes2.add_run(f"Potential fuel savings of {hull_metrics['fuel_savings']:.1f} MT/D could be achieved through hull cleaning and propeller polishing.")
+            
+            doc.add_paragraph()
         
-        # Add notes about hull performance
-        doc.add_heading('Notes:', 2)
-        notes = doc.add_paragraph()
-        notes.add_run('- ').bold = True
-        notes.add_run(f"The vessel shows {hull_metrics['power_loss']:.1f}% additional power consumption, indicating a {hull_metrics['condition'].lower()} hull condition.")
+        # Speed Consumption section (if enabled)
+        if options['include_speed']:
+            doc.add_heading('Speed Consumption Profile', 1)
+            
+            # Create a 2-column table for charts
+            chart_table = doc.add_table(rows=1, cols=2)
+            chart_table.style = 'Table Grid'
+            
+            # Left column - Ballast condition
+            if 'ballast_chart' in speed_metrics and speed_metrics['ballast_chart'] is not None:
+                try:
+                    # Save chart as image
+                    ballast_chart_path = self._save_chart_as_image(speed_metrics['ballast_chart'])
+                    # Add paragraph with heading for the chart
+                    chart_table.cell(0, 0).paragraphs[0].add_run("Ballast Condition").bold = True
+                    # Add image to table cell
+                    chart_table.cell(0, 0).add_paragraph().add_run().add_picture(ballast_chart_path, width=Inches(3.0))
+                    # Delete temporary file
+                    os.unlink(ballast_chart_path)
+                except Exception as e:
+                    chart_table.cell(0, 0).add_paragraph(f"[Ballast chart could not be generated: {str(e)}]")
+            else:
+                chart_table.cell(0, 0).add_paragraph("[No ballast condition data available]")
+            
+            # Right column - Laden condition
+            if 'laden_chart' in speed_metrics and speed_metrics['laden_chart'] is not None:
+                try:
+                    # Save chart as image
+                    laden_chart_path = self._save_chart_as_image(speed_metrics['laden_chart'])
+                    # Add paragraph with heading for the chart
+                    chart_table.cell(0, 1).paragraphs[0].add_run("Laden Condition").bold = True
+                    # Add image to table cell
+                    chart_table.cell(0, 1).add_paragraph().add_run().add_picture(laden_chart_path, width=Inches(3.0))
+                    # Delete temporary file
+                    os.unlink(laden_chart_path)
+                except Exception as e:
+                    chart_table.cell(0, 1).add_paragraph(f"[Laden chart could not be generated: {str(e)}]")
+            else:
+                chart_table.cell(0, 1).add_paragraph("[No laden condition data available]")
+            
+            doc.add_paragraph()
+            
+            doc.add_heading('Notes:', 2)
+            speed_notes = doc.add_paragraph()
+            speed_notes.add_run('- ').bold = True
+            
+            if 'ballast_data' in speed_metrics and speed_metrics['ballast_data']:
+                ballast_avg = sum(speed_metrics['ballast_consumptions']) / len(speed_metrics['ballast_consumptions'])
+                speed_notes.add_run(f"In ballast condition, the vessel shows an average fuel consumption of {ballast_avg:.1f} MT/day.")
+            else:
+                speed_notes.add_run("Insufficient data to analyze ballast condition performance.")
+            
+            speed_notes2 = doc.add_paragraph()
+            speed_notes2.add_run('- ').bold = True
+            
+            if 'laden_data' in speed_metrics and speed_metrics['laden_data']:
+                laden_avg = sum(speed_metrics['laden_consumptions']) / len(speed_metrics['laden_consumptions'])
+                speed_notes2.add_run(f"In laden condition, the vessel shows an average fuel consumption of {laden_avg:.1f} MT/day.")
+            else:
+                speed_notes2.add_run("Insufficient data to analyze laden condition performance.")
+            
+            doc.add_paragraph()
         
-        if hull_metrics['fuel_savings'] > 0:
-            notes2 = doc.add_paragraph()
-            notes2.add_run('- ').bold = True
-            notes2.add_run(f"Potential fuel savings of {hull_metrics['fuel_savings']:.1f} MT/D could be achieved through hull cleaning and propeller polishing.")
+        # Emissions section (if enabled)
+        if options['include_emissions']:
+            doc.add_heading('Emissions Profile', 1)
+            doc.add_paragraph("CII rating for 2024 of the vessel is 'A' (exclusions not included). CII rating for 2024 is provisional, as it is subject to further verification and adjustments based on exclusion data.")
+            doc.add_paragraph("[Emissions chart will be inserted here]")
+            doc.add_paragraph()
         
-        doc.add_paragraph()
-        
-        # Speed Consumption section
-        doc.add_heading('Speed Consumption Profile', 1)
-        doc.add_paragraph('Charts will be inserted here in the final report')
-        
-        doc.add_heading('Notes:', 2)
-        speed_notes = doc.add_paragraph()
-        speed_notes.add_run('- ').bold = True
-        
-        if 'ballast_data' in speed_metrics and speed_metrics['ballast_data']:
-            ballast_avg = sum(speed_metrics['ballast_consumptions']) / len(speed_metrics['ballast_consumptions'])
-            speed_notes.add_run(f"In ballast condition, the vessel shows an average fuel consumption of {ballast_avg:.1f} MT/day.")
-        else:
-            speed_notes.add_run("Insufficient data to analyze ballast condition performance.")
-        
-        speed_notes2 = doc.add_paragraph()
-        speed_notes2.add_run('- ').bold = True
-        
-        if 'laden_data' in speed_metrics and speed_metrics['laden_data']:
-            laden_avg = sum(speed_metrics['laden_consumptions']) / len(speed_metrics['laden_consumptions'])
-            speed_notes2.add_run(f"In laden condition, the vessel shows an average fuel consumption of {laden_avg:.1f} MT/day.")
-        else:
-            speed_notes2.add_run("Insufficient data to analyze laden condition performance.")
+        # Machinery section (if enabled)
+        if options['include_machinery']:
+            doc.add_heading('Main Engine Performance', 1)
+            machinery_table = doc.add_table(rows=3, cols=2)
+            machinery_table.style = 'Table Grid'
+            
+            rows = machinery_table.rows
+            rows[0].cells[0].text = 'Average ME SFOC'
+            rows[0].cells[1].text = "Data not available"
+            
+            rows[1].cells[0].text = 'ME Recommendation'
+            rows[1].cells[1].text = "ME Performance is within Acceptable Range"
+            
+            rows[2].cells[0].text = 'Potential Fuel Saving from ME'
+            rows[2].cells[1].text = "-"
+            
+            doc.add_paragraph()
+            
+            doc.add_heading('Auxiliaries Performance', 2)
+            aux_table = doc.add_table(rows=2, cols=2)
+            aux_table.style = 'Table Grid'
+            
+            rows = aux_table.rows
+            rows[0].cells[0].text = 'Excess Boiler Consumption (last 6 month)'
+            rows[0].cells[1].text = "Data not available"
+            
+            rows[1].cells[0].text = 'Redundant AE Hours (last 6 month)'
+            rows[1].cells[1].text = "-"
+            
+            doc.add_paragraph()
         
         # Appendix
         doc.add_heading('Appendix', 1)
@@ -386,6 +537,10 @@ class ReportGeneratorAgent:
         appendix3.add_run('- ').bold = True
         appendix3.add_run("Days with Steaming hrs greater than 17 considered for analysis.")
         
+        appendix4 = doc.add_paragraph()
+        appendix4.add_run('- ').bold = True
+        appendix4.add_run("Data is compared with Original Sea Trial")
+        
         doc.add_heading('Hull Performance', 2)
         hull_app1 = doc.add_paragraph()
         hull_app1.add_run('- ').bold = True
@@ -398,6 +553,26 @@ class ReportGeneratorAgent:
         hull_app3 = doc.add_paragraph()
         hull_app3.add_run('- ').bold = True
         hull_app3.add_run("Excess Power > 25 % -- Rating Poor")
+        
+        if options['include_machinery']:
+            doc.add_heading('Machinery Performance', 2)
+            mach_app1 = doc.add_paragraph()
+            mach_app1.add_run('- ').bold = True
+            mach_app1.add_run("SFOC(Grms/kW.hr) within +/- 10 from Shop test condition are considered as \"Good\"")
+            
+            mach_app2 = doc.add_paragraph()
+            mach_app2.add_run('- ').bold = True
+            mach_app2.add_run("SFOC(Grms/kW.hr) Greater than 10 and less than 20 are considered as \"Average\"")
+            
+            mach_app3 = doc.add_paragraph()
+            mach_app3.add_run('- ').bold = True
+            mach_app3.add_run("SFOC(Grms/kW.hr) Above 20 are considered as \"Poor\"")
+        
+        if options['include_speed']:
+            doc.add_heading('Speed Consumption Performance', 2)
+            speed_app = doc.add_paragraph()
+            speed_app.add_run('- ').bold = True
+            speed_app.add_run("Analysis carried out using regression techniques.")
         
         # Convert the document to bytes
         docx_file = BytesIO()
