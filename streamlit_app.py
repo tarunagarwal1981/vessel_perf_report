@@ -3,11 +3,8 @@ import datetime
 import pandas as pd
 import traceback
 import os
-from pathlib import Path
-
-# Add the project root to Python path if needed
-project_root = Path(__file__).parent
-sys.path.append(str(project_root))
+print("Current working directory:", os.getcwd())
+print("Python path:", sys.path)
 
 
 # For debug logging
