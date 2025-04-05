@@ -5,8 +5,9 @@ import pandas as pd
 # Import the agents
 from agents.hull_performance import HullPerformanceAgent
 from agents.speed_consumption import SpeedConsumptionAgent
-from agents.report_generator import ReportGeneratorAgent  # Add the new agent
+#from agents.report_generator import ReportGeneratorAgent  # Add the new agent
 from utils.data_fetcher import fetch_data_from_lambda
+from agents.minimal_report import MinimalReportGenerator
 
 # Set page configuration
 st.set_page_config(
