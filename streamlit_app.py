@@ -5,6 +5,7 @@ import pandas as pd
 # Import the agents
 from agents.hull_performance import HullPerformanceAgent
 from agents.speed_consumption import SpeedConsumptionAgent
+from agents.report_generator import ReportGeneratorAgent  # Add the new agent
 from utils.data_fetcher import fetch_data_from_lambda
 
 # Set page configuration
@@ -66,11 +67,12 @@ else:
                     vessel_data = [row for row in vessel_data if row.get('windforce', 0) > 4]
                 
                 # Create main tabs for different analysis types
-                main_tab1, main_tab2 = st.tabs(["Hull Performance", "Speed-Consumption Analysis"])
+                main_tab1, main_tab2, main_tab3 = st.tabs(["Hull Performance", "Speed-Consumption Analysis", "Generate Report"])
                 
                 # Initialize the agents
                 hull_agent = HullPerformanceAgent()
                 speed_agent = SpeedConsumptionAgent()
+                report_agent = ReportGeneratorAgent()  # Initialize the report generator
                 
                 # Hull Performance Tab
                 with main_tab1:
@@ -79,6 +81,10 @@ else:
                 # Speed-Consumption Tab
                 with main_tab2:
                     speed_agent.run(vessel_data, selected_vessel)
+                
+                # Report Generator Tab
+                with main_tab3:
+                    report_agent.run(vessel_data, selected_vessel, hull_agent, speed_agent)
                 
                 # Display the raw data
                 with st.expander("View Raw Data"):
