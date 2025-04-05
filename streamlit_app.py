@@ -72,8 +72,8 @@ if st.session_state.analysis_completed:
         st.session_state.selected_vessel = ""
         st.session_state.analysis_completed = False
         st.session_state.error_message = None
-        # Force a rerun to refresh the UI
-        st.experimental_rerun()
+        # Force a page refresh (using st.rerun instead of experimental_rerun)
+        st.rerun()
 
 # Check if dates are valid
 if start_date > end_date:
@@ -117,8 +117,8 @@ else:
                     st.session_state.analysis_completed = True
                     st.session_state.error_message = None
                     
-                    # Force a rerun to show the tabs
-                    st.experimental_rerun()
+                    # Use st.rerun() to refresh the page instead of experimental_rerun
+                    st.rerun()
                 else:
                     st.session_state.error_message = f"No performance data available for {selected_vessel} in the selected date range."
                     st.error(st.session_state.error_message)
