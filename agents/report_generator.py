@@ -4,11 +4,12 @@ import numpy as np
 import plotly.graph_objects as go
 from io import BytesIO
 from docx import Document
-from docx.shared import Inches, Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches, Pt
 import base64
 import tempfile
 import os
+import copy
+import uuid
 
 class ReportGeneratorAgent:
     def __init__(self):
@@ -62,22 +63,31 @@ class ReportGeneratorAgent:
             # Show example charts
             st.subheader("Hull & Propeller Performance Analysis")
             if 'hull_chart' in hull_metrics and hull_metrics['hull_chart'] is not None:
-                st.plotly_chart(hull_metrics['hull_chart'], use_container_width=True)
+                # Generate a unique key for the chart
+                chart_key = f"hull_chart_{str(uuid.uuid4())[:8]}"
+                st.plotly_chart(hull_metrics['hull_chart'], use_container_width=True, key=chart_key)
             
             st.subheader("Speed Consumption Profile")
             # Create two columns for the speed consumption charts
-            if 'ballast_chart' in speed_metrics and speed_metrics['ballast_chart'] is not None:
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**Ballast Condition**")
-                    st.plotly_chart(speed_metrics['ballast_chart'], use_container_width=True)
-                
-                with col2:
-                    st.markdown("**Laden Condition**")
-                    if 'laden_chart' in speed_metrics and speed_metrics['laden_chart'] is not None:
-                        st.plotly_chart(speed_metrics['laden_chart'], use_container_width=True)
-                    else:
-                        st.info("No laden condition data available")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Ballast Condition**")
+                if 'ballast_chart' in speed_metrics and speed_metrics['ballast_chart'] is not None:
+                    # Generate a unique key for the chart
+                    ballast_key = f"ballast_chart_{str(uuid.uuid4())[:8]}"
+                    st.plotly_chart(speed_metrics['ballast_chart'], use_container_width=True, key=ballast_key)
+                else:
+                    st.info("No ballast condition data available")
+            
+            with col2:
+                st.markdown("**Laden Condition**")
+                if 'laden_chart' in speed_metrics and speed_metrics['laden_chart'] is not None:
+                    # Generate a unique key for the chart
+                    laden_key = f"laden_chart_{str(uuid.uuid4())[:8]}"
+                    st.plotly_chart(speed_metrics['laden_chart'], use_container_width=True, key=laden_key)
+                else:
+                    st.info("No laden condition data available")
         
         with report_tab2:
             st.markdown("### Generate and Download Report")
@@ -169,7 +179,7 @@ class ReportGeneratorAgent:
                 'condition': condition,
                 'fuel_savings': fuel_savings,
                 'recommendation': recommendation,
-                'hull_chart': chart
+                'hull_chart': chart  # This is already a unique chart object
             }
         else:
             # Default values if no data available
@@ -250,7 +260,7 @@ class ReportGeneratorAgent:
         if not x_data or not y_data:
             return None
         
-        # Create the figure
+        # Create the figure - each call creates a new unique Figure object
         fig = go.Figure()
         
         # Add scatter plot
@@ -273,7 +283,6 @@ class ReportGeneratorAgent:
             y_sorted = [y_data[i] for i in sorted_indices]
             
             # Fit a 2nd order polynomial
-            coeffs = None
             try:
                 import numpy as np
                 coeffs = np.polyfit(x_sorted, y_sorted, 2)
@@ -294,8 +303,9 @@ class ReportGeneratorAgent:
             except Exception as e:
                 print(f"Could not generate trend line: {e}")
         
-        # Update layout
-        fig.update_layout(
+        # Add a unique ID to the figure's layout for additional safety
+        unique_id = str(uuid.uuid4())
+        fig.layout.update(
             title=chart_title,
             xaxis_title="Speed (knots)",
             yaxis_title="Fuel Consumption (mt/day)",
@@ -303,16 +313,24 @@ class ReportGeneratorAgent:
             height=400,
             width=500,
             margin=dict(l=40, r=40, t=40, b=40),
+            uirevision=unique_id  # Add a unique ID to prevent reuse issues
         )
         
         return fig
     
     def _save_chart_as_image(self, fig):
+        # Create a deep copy of the figure to avoid any reference issues
+        fig_copy = copy.deepcopy(fig)
+        
         # Create a temporary file to save the image
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp:
             # Save the figure as a PNG file
-            fig.write_image(temp.name, scale=2)
-            return temp.name
+            try:
+                fig_copy.write_image(temp.name, scale=2)
+                return temp.name
+            except Exception as e:
+                print(f"Error saving chart image: {e}")
+                return None
     
     def _generate_docx_report(self, vessel_name, report_date, analyst_name, hull_metrics, speed_metrics, options):
         # Create a new Document
@@ -396,12 +414,19 @@ class ReportGeneratorAgent:
             # Add hull performance chart if available
             if 'hull_chart' in hull_metrics and hull_metrics['hull_chart'] is not None:
                 try:
+                    # Make a copy of the chart for saving
+                    chart_to_save = copy.deepcopy(hull_metrics['hull_chart'])
+                    
                     # Save chart as image
-                    chart_path = self._save_chart_as_image(hull_metrics['hull_chart'])
-                    # Add image to document
-                    doc.add_picture(chart_path, width=Inches(6.0))
-                    # Delete temporary file
-                    os.unlink(chart_path)
+                    chart_path = self._save_chart_as_image(chart_to_save)
+                    
+                    if chart_path:
+                        # Add image to document
+                        doc.add_picture(chart_path, width=Inches(6.0))
+                        # Delete temporary file
+                        os.unlink(chart_path)
+                    else:
+                        doc.add_paragraph("[Chart image could not be generated]")
                 except Exception as e:
                     doc.add_paragraph(f"[Chart image could not be generated: {str(e)}]")
             else:
@@ -431,14 +456,21 @@ class ReportGeneratorAgent:
             # Left column - Ballast condition
             if 'ballast_chart' in speed_metrics and speed_metrics['ballast_chart'] is not None:
                 try:
+                    # Make a copy of the chart for saving
+                    ballast_to_save = copy.deepcopy(speed_metrics['ballast_chart'])
+                    
                     # Save chart as image
-                    ballast_chart_path = self._save_chart_as_image(speed_metrics['ballast_chart'])
-                    # Add paragraph with heading for the chart
-                    chart_table.cell(0, 0).paragraphs[0].add_run("Ballast Condition").bold = True
-                    # Add image to table cell
-                    chart_table.cell(0, 0).add_paragraph().add_run().add_picture(ballast_chart_path, width=Inches(3.0))
-                    # Delete temporary file
-                    os.unlink(ballast_chart_path)
+                    ballast_chart_path = self._save_chart_as_image(ballast_to_save)
+                    
+                    if ballast_chart_path:
+                        # Add paragraph with heading for the chart
+                        chart_table.cell(0, 0).paragraphs[0].add_run("Ballast Condition").bold = True
+                        # Add image to table cell
+                        chart_table.cell(0, 0).add_paragraph().add_run().add_picture(ballast_chart_path, width=Inches(3.0))
+                        # Delete temporary file
+                        os.unlink(ballast_chart_path)
+                    else:
+                        chart_table.cell(0, 0).add_paragraph("[Ballast chart could not be generated]")
                 except Exception as e:
                     chart_table.cell(0, 0).add_paragraph(f"[Ballast chart could not be generated: {str(e)}]")
             else:
@@ -447,14 +479,21 @@ class ReportGeneratorAgent:
             # Right column - Laden condition
             if 'laden_chart' in speed_metrics and speed_metrics['laden_chart'] is not None:
                 try:
+                    # Make a copy of the chart for saving
+                    laden_to_save = copy.deepcopy(speed_metrics['laden_chart'])
+                    
                     # Save chart as image
-                    laden_chart_path = self._save_chart_as_image(speed_metrics['laden_chart'])
-                    # Add paragraph with heading for the chart
-                    chart_table.cell(0, 1).paragraphs[0].add_run("Laden Condition").bold = True
-                    # Add image to table cell
-                    chart_table.cell(0, 1).add_paragraph().add_run().add_picture(laden_chart_path, width=Inches(3.0))
-                    # Delete temporary file
-                    os.unlink(laden_chart_path)
+                    laden_chart_path = self._save_chart_as_image(laden_to_save)
+                    
+                    if laden_chart_path:
+                        # Add paragraph with heading for the chart
+                        chart_table.cell(0, 1).paragraphs[0].add_run("Laden Condition").bold = True
+                        # Add image to table cell
+                        chart_table.cell(0, 1).add_paragraph().add_run().add_picture(laden_chart_path, width=Inches(3.0))
+                        # Delete temporary file
+                        os.unlink(laden_chart_path)
+                    else:
+                        chart_table.cell(0, 1).add_paragraph("[Laden chart could not be generated]")
                 except Exception as e:
                     chart_table.cell(0, 1).add_paragraph(f"[Laden chart could not be generated: {str(e)}]")
             else:
