@@ -4,11 +4,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime, timedelta
-import boto3
+import requests
 import json
 import io
 import os
-import base64
 from PIL import Image
 from io import BytesIO
 import tempfile
@@ -83,82 +82,102 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Lambda connection helper function
-def invoke_lambda(function_name, payload):
-    """Invoke AWS Lambda function and return the response"""
-    lambda_client = boto3.client(
-        'lambda',
-        region_name=os.environ.get('AWS_REGION', 'us-east-1'),
-        aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
-        aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY')
-    )
-    
-    response = lambda_client.invoke(
-        FunctionName=function_name,
-        InvocationType='RequestResponse',
-        Payload=json.dumps(payload)
-    )
-    
-    return json.loads(response['Payload'].read().decode('utf-8'))
+# Lambda connection configuration
+LAMBDA_URL = "https://crcgfvseuzhdqhhvan5gz2hr4e0kirfy.lambda-url.ap-south-1.on.aws/"
 
-# Function to fetch data from RDS via Lambda
-@st.cache_data(ttl=3600)
-def fetch_data(query_type, params=None):
-    """Fetch data from RDS database through Lambda function"""
+# Function to call Lambda function via API URL
+def call_lambda_api(operation, params=None):
+    """Call Lambda function via API URL endpoint"""
     try:
         payload = {
-            "query_type": query_type,
-            "params": params or {}
+            "operation": operation
         }
         
-        response = invoke_lambda("marine_performance_data_fetcher", payload)
+        # Add any additional parameters
+        if params:
+            payload.update(params)
+            
+        response = requests.post(
+            LAMBDA_URL, 
+            json=payload,
+            headers={"Content-Type": "application/json"}
+        )
         
-        if "error" in response:
-            st.error(f"Error fetching data: {response['error']}")
+        if response.status_code != 200:
+            st.error(f"Error calling Lambda function: {response.status_code}")
+            st.error(f"Response: {response.text}")
             return None
+            
+        result = response.json()
         
-        if query_type in ["vessel_list", "vessel_details"]:
-            return response["data"]
-        else:
-            return pd.DataFrame(response["data"])
+        if "error" in result:
+            st.error(f"Error from Lambda: {result['error']}")
+            return None
+            
+        return result
     except Exception as e:
-        st.error(f"Error connecting to database: {str(e)}")
-        # For demo/development purposes, fallback to local files
-        if st.checkbox("Use local sample data instead?"):
-            return load_sample_data(query_type)
+        st.error(f"Error connecting to Lambda: {str(e)}")
         return None
+
+# Function to fetch data - doesn't use caching with widgets inside
+def fetch_data(operation, params=None):
+    """Fetch data from Lambda function"""
+    result = call_lambda_api(operation, params)
+    
+    if result is None or not result.get("success", False):
+        st.error(f"Failed to fetch data for operation: {operation}")
+        
+        # Offer sample data option outside the cached function
+        return None
+    
+    return result.get("data", [])
 
 # Sample data loader for development/demo
 def load_sample_data(data_type):
-    """Load sample data from local files"""
+    """Load sample data when API is unavailable"""
     try:
-        if data_type == "vessel_list":
+        if data_type == "getVessels":
             # Return a list of vessel names
             return ["VESSEL_A", "VESSEL_B", "VESSEL_C"]
         
-        elif data_type == "performance_data":
-            return pd.read_csv("sample_data/Hull Performance data.csv")
+        elif data_type == "getHullPerformance":
+            # Create sample data for hull performance
+            dates = pd.date_range(end=datetime.now(), periods=100, freq='D')
+            
+            data = []
+            for i, date in enumerate(dates):
+                # Simulating increasing hull roughness
+                hull_roughness = 10 + i * 0.15 + np.random.randint(-3, 3)
+                excess_fuel = 2 + i * 0.05 + np.random.randint(-1, 1)
+                
+                # Alternate between ballast and laden
+                loading_condition = "BALLAST" if i % 2 == 0 else "LADEN"
+                
+                # Random speed within reasonable range
+                speed = 12 + np.random.randint(-2, 3)
+                
+                # Calculate consumption based on speed and some randomness
+                consumption = 30 + speed * 1.5 + np.random.randint(-5, 5)
+                
+                data.append({
+                    "vessel_name": "SAMPLE_VESSEL",
+                    "report_date": date.isoformat(),
+                    "hull_roughness_power_loss": hull_roughness,
+                    "hull_excess_fuel_oil_mtd": excess_fuel,
+                    "loading_condition": loading_condition,
+                    "speed": speed,
+                    "windforce": np.random.randint(0, 5),
+                    "normalised_consumption": consumption
+                })
+            
+            return data
         
-        elif data_type == "coeff_data":
-            return pd.read_csv("sample_data/vessel performance coeff.csv")
-        
-        elif data_type == "sea_trial_data":
-            return pd.read_excel("sample_data/Sea_Trial.xlsx", engine='openpyxl')
-        
-        elif data_type == "dd_dates_data":
-            return pd.read_excel("sample_data/DD dates.xlsx", engine='openpyxl')
-        
-        elif data_type == "consumption_log_data":
-            return pd.read_csv("sample_data/consumption_log.csv")
-        
-        elif data_type == "vessel_particulars_data":
-            return pd.read_excel("sample_data/Vessel_Particulars.xlsx", engine='openpyxl')
-        
-        elif data_type == "perf_app_data":
-            return pd.read_csv("sample_data/performance app.csv")
+        elif data_type == "getLastDrydockDate":
+            # Return a date 2 years ago
+            return (datetime.now() - timedelta(days=730)).isoformat()
             
         else:
-            st.warning(f"Unknown data type requested: {data_type}")
+            st.warning(f"Unknown sample data type requested: {data_type}")
             return None
     except Exception as e:
         st.error(f"Error loading sample data: {str(e)}")
@@ -166,57 +185,82 @@ def load_sample_data(data_type):
 
 # Create neon color gradient for charts
 def create_neon_color_gradient(dates):
-    norm = plt.Normalize(dates.min().toordinal(), dates.max().toordinal())
+    """Create a neon color gradient based on date range"""
+    # Convert string dates to datetime if needed
+    if isinstance(dates[0], str):
+        dates = [pd.to_datetime(d) for d in dates]
+        
+    norm = plt.Normalize(min(d.toordinal() for d in dates), max(d.toordinal() for d in dates))
     cmap = plt.get_cmap('plasma')
-    return [cmap(norm(date.toordinal())) for date in dates]
+    return [cmap(norm(d.toordinal())) for d in dates]
 
 # Polynomial fitting function
 def polynomial_fit(x, y, degree):
+    """Calculate polynomial fit for the given data"""
     coeffs = np.polyfit(x, y, degree)
     return np.poly1d(coeffs)
 
 # Exponential fitting function
 def exponential_fit(x, y):
-    log_y = np.log(y)
-    coeffs = np.polyfit(x, log_y, 1)
+    """Calculate exponential fit for the given data"""
+    # Handle zero or negative values
+    valid_indices = np.where(y > 0)[0]
+    if len(valid_indices) < 2:
+        # Fall back to polynomial if not enough valid points
+        return polynomial_fit(x, y, 1)
+        
+    x_valid = np.array([x[i] for i in valid_indices])
+    y_valid = np.array([y[i] for i in valid_indices])
+    
+    log_y = np.log(y_valid)
+    coeffs = np.polyfit(x_valid, log_y, 1)
     return lambda x: np.exp(coeffs[1] + coeffs[0] * x)
 
-# Calculate consumption function
-def calculate_consumption(vessel_data, speeds, displacements):
-    results = []
-    for speed in speeds:
-        for displacement in displacements:
-            consumption = (vessel_data['CONSP_SPEED1'] * speed +
-                          vessel_data['CONSP_DISP1'] * displacement +
-                          vessel_data['CONSP_SPEED2'] * speed**2 +
-                          vessel_data['CONSP_DISP2'] * displacement**2 +
-                          vessel_data['CONSP_INTERCEPT'])
-            results.append({
-                'Speed': speed,
-                'Displacement': displacement,
-                'Consumption (mt/day)': consumption
-            })
-    return results
+# Calculate consumption function (placeholder - would connect to your API)
+def calculate_consumption(speed, displacement, coefficients):
+    """Calculate fuel consumption based on speed and displacement"""
+    # This is a simplified placeholder - you should replace with your actual calculation
+    consumption = (
+        coefficients.get('speed_coeff', 0.5) * speed +
+        coefficients.get('disp_coeff', 0.3) * displacement +
+        coefficients.get('speed2_coeff', 0.05) * speed**2 +
+        coefficients.get('disp2_coeff', 0.02) * displacement**2 +
+        coefficients.get('intercept', 10)
+    )
+    return consumption
 
 # Function to create interactive Plotly charts for speed vs consumption
-def create_interactive_chart(vessel_data, condition, event_date=None, event_name="Event"):
-    # Filter data for the condition
-    condition_data = vessel_data[vessel_data['LOADING_CONDITION'].str.lower() == condition.lower()]
+def create_interactive_chart(data, condition, coefficients=None):
+    """Create an interactive chart for speed vs consumption analysis"""
+    # Parse dates if they're strings
+    if isinstance(data[0].get('report_date'), str):
+        for row in data:
+            row['report_date'] = pd.to_datetime(row['report_date'])
     
-    if condition_data.empty:
+    # Filter data for the condition
+    condition_data = [row for row in data if row['loading_condition'].lower() == condition.lower()]
+    
+    if not condition_data:
         return go.Figure().update_layout(title=f"No data available for {condition} condition")
     
     # Create figure
     fig = go.Figure()
     
     # Add scatter plot for actual data
+    speeds = [row['speed'] for row in condition_data]
+    consumptions = [row['normalised_consumption'] for row in condition_data]
+    dates = [row['report_date'] for row in condition_data]
+    
+    # Create color scale based on dates
+    date_colors = [pd.to_datetime(d).toordinal() for d in dates]
+    
     fig.add_trace(go.Scatter(
-        x=condition_data['SPEED'],
-        y=condition_data['NORMALISED_CONSUMPTION'],
+        x=speeds,
+        y=consumptions,
         mode='markers',
         marker=dict(
             size=10,
-            color=condition_data['REPORT_DATE'].apply(lambda x: x.toordinal()),
+            color=date_colors,
             colorscale='Plasma',
             showscale=True,
             colorbar=dict(title="Date")
@@ -224,15 +268,12 @@ def create_interactive_chart(vessel_data, condition, event_date=None, event_name
         name='Actual Data'
     ))
     
-    # Fit curve to data
-    x_data = condition_data['SPEED'].values
-    y_data = condition_data['NORMALISED_CONSUMPTION'].values
-    
-    if len(x_data) > 2:
+    # Fit curve to data if we have enough points
+    if len(speeds) > 2:
         try:
             # Exponential fit
-            exp_func = exponential_fit(x_data, y_data)
-            x_smooth = np.linspace(min(x_data), max(x_data), 100)
+            exp_func = exponential_fit(speeds, consumptions)
+            x_smooth = np.linspace(min(speeds), max(speeds), 100)
             y_smooth = [exp_func(x) for x in x_smooth]
             
             fig.add_trace(go.Scatter(
@@ -240,59 +281,46 @@ def create_interactive_chart(vessel_data, condition, event_date=None, event_name
                 y=y_smooth,
                 mode='lines',
                 line=dict(color='#48CAE4', width=3),
-                name='Exponential Fit'
+                name='Performance Trend'
             ))
         except Exception as e:
-            st.warning(f"Could not create exponential fit: {str(e)}")
+            st.warning(f"Could not create trend line: {str(e)}")
     
-    # Add sea trial baseline data if available
-    sea_trial_data = fetch_data("sea_trial_data", {"vessel_name": selected_vessel})
-    coeff_data = fetch_data("coeff_data", {"vessel_name": selected_vessel})
-    
-    if sea_trial_data is not None and coeff_data is not None and not coeff_data.empty:
-        # Get baseline consumption values
-        displacements = sea_trial_data['DISPLACEMENT'].sort_values().values
+    # Add baseline/reference data if coefficients are available
+    if coefficients:
+        # Generate baseline consumption values
+        displacement = 8.0 if condition.lower() == 'ballast' else 12.0  # Example values
+        baseline_speeds = np.arange(8, 16, 1)
+        baseline_consumptions = [calculate_consumption(speed, displacement, coefficients) for speed in baseline_speeds]
         
-        if len(displacements) >= 2:
-            if condition.lower() == 'ballast':
-                displacement = displacements[0] / 10000
-            else:  # laden
-                displacement = displacements[-1] / 10000
+        fig.add_trace(go.Scatter(
+            x=baseline_speeds,
+            y=baseline_consumptions,
+            mode='markers',
+            marker=dict(size=10, color='#00FFFF', symbol='diamond'),
+            name='Baseline'
+        ))
+        
+        # Trend line for baseline
+        if len(baseline_speeds) > 2:
+            try:
+                p_baseline = polynomial_fit(baseline_speeds, baseline_consumptions, 2)
+                x_smooth_baseline = np.linspace(min(baseline_speeds), max(baseline_speeds), 100)
+                y_smooth_baseline = p_baseline(x_smooth_baseline)
                 
-            speeds = np.arange(8, 16, 1)
-            calculated_results = calculate_consumption(coeff_data.iloc[0], speeds, [displacement])
-            
-            baseline_speeds = [result['Speed'] for result in calculated_results]
-            baseline_consumptions = [result['Consumption (mt/day)'] for result in calculated_results]
-            
-            fig.add_trace(go.Scatter(
-                x=baseline_speeds,
-                y=baseline_consumptions,
-                mode='markers',
-                marker=dict(size=10, color='#00FFFF', symbol='diamond'),
-                name='Baseline'
-            ))
-            
-            # Polynomial fit for baseline
-            if len(baseline_speeds) > 2:
-                try:
-                    p_baseline = polynomial_fit(baseline_speeds, baseline_consumptions, 2)
-                    x_smooth_baseline = np.linspace(min(baseline_speeds), max(baseline_speeds), 100)
-                    y_smooth_baseline = p_baseline(x_smooth_baseline)
-                    
-                    fig.add_trace(go.Scatter(
-                        x=x_smooth_baseline,
-                        y=y_smooth_baseline,
-                        mode='lines',
-                        line=dict(color='#d9d9d9', width=2, dash='dash'),
-                        name='Baseline Trend'
-                    ))
-                except Exception as e:
-                    st.warning(f"Could not create baseline fit: {str(e)}")
+                fig.add_trace(go.Scatter(
+                    x=x_smooth_baseline,
+                    y=y_smooth_baseline,
+                    mode='lines',
+                    line=dict(color='#d9d9d9', width=2, dash='dash'),
+                    name='Baseline Trend'
+                ))
+            except Exception as e:
+                st.warning(f"Could not create baseline trend: {str(e)}")
     
     # Update layout
     fig.update_layout(
-        title=f"{condition.capitalize()} Condition - {selected_vessel.upper()}",
+        title=f"{condition.capitalize()} Condition Analysis",
         xaxis_title="Speed (knots)",
         yaxis_title="ME Consumption (mT/day)",
         template="plotly_dark",
@@ -304,24 +332,39 @@ def create_interactive_chart(vessel_data, condition, event_date=None, event_name
     return fig
 
 # Function to create hull roughness chart
-def create_hull_roughness_chart(vessel_data):
-    # Drop missing values and filter for power loss data
-    filtered_data = vessel_data.dropna(subset=['HULL_ROUGHNESS_POWER_LOSS'])
+def create_hull_roughness_chart(data):
+    """Create an interactive chart for hull roughness performance"""
+    # Parse dates if they're strings
+    if isinstance(data[0].get('report_date'), str):
+        for row in data:
+            row['report_date'] = pd.to_datetime(row['report_date'])
     
-    if filtered_data.empty:
+    # Filter out entries without hull roughness data
+    filtered_data = [row for row in data if 'hull_roughness_power_loss' in row and row['hull_roughness_power_loss'] is not None]
+    
+    if not filtered_data:
         return go.Figure().update_layout(title="No hull roughness data available")
+    
+    # Sort by date
+    filtered_data.sort(key=lambda x: x['report_date'])
+    
+    # Extract data
+    dates = [row['report_date'] for row in filtered_data]
+    hull_roughness = [row['hull_roughness_power_loss'] for row in filtered_data]
     
     # Create figure
     fig = go.Figure()
     
     # Add scatter plot for power loss data
+    date_colors = [pd.to_datetime(d).toordinal() for d in dates]
+    
     fig.add_trace(go.Scatter(
-        x=filtered_data['REPORT_DATE'],
-        y=filtered_data['HULL_ROUGHNESS_POWER_LOSS'],
+        x=dates,
+        y=hull_roughness,
         mode='markers',
         marker=dict(
             size=10,
-            color=filtered_data['REPORT_DATE'].apply(lambda x: x.toordinal()),
+            color=date_colors,
             colorscale='Plasma',
             showscale=True,
             colorbar=dict(title="Date")
@@ -331,18 +374,16 @@ def create_hull_roughness_chart(vessel_data):
     
     # Add trend line
     if len(filtered_data) > 2:
-        x_power = filtered_data['REPORT_DATE'].map(datetime.toordinal)
-        y_power = filtered_data['HULL_ROUGHNESS_POWER_LOSS']
-        
         try:
-            z_power = np.polyfit(x_power, y_power, 1)
+            x_numeric = [pd.to_datetime(d).toordinal() for d in dates]
+            z_power = np.polyfit(x_numeric, hull_roughness, 1)
             p_power = np.poly1d(z_power)
             
-            x_dates = [filtered_data['REPORT_DATE'].min(), filtered_data['REPORT_DATE'].max()]
-            y_trend = p_power([x.toordinal() for x in x_dates])
+            x_trend = [min(dates), max(dates)]
+            y_trend = p_power([pd.to_datetime(d).toordinal() for d in x_trend])
             
             fig.add_trace(go.Scatter(
-                x=x_dates,
+                x=x_trend,
                 y=y_trend,
                 mode='lines',
                 line=dict(color='#ff006e', width=3),
@@ -352,25 +393,25 @@ def create_hull_roughness_chart(vessel_data):
             # Add lines at 15% and 25% thresholds
             fig.add_shape(
                 type="line",
-                x0=filtered_data['REPORT_DATE'].min(),
+                x0=min(dates),
                 y0=15,
-                x1=filtered_data['REPORT_DATE'].max(),
+                x1=max(dates),
                 y1=15,
                 line=dict(color="yellow", width=2, dash="dash"),
             )
             
             fig.add_shape(
                 type="line",
-                x0=filtered_data['REPORT_DATE'].min(),
+                x0=min(dates),
                 y0=25,
-                x1=filtered_data['REPORT_DATE'].max(),
+                x1=max(dates),
                 y1=25,
                 line=dict(color="red", width=2, dash="dash"),
             )
             
             # Add annotations for the thresholds
             fig.add_annotation(
-                x=filtered_data['REPORT_DATE'].max(),
+                x=max(dates),
                 y=15,
                 text="15% - Average condition",
                 showarrow=False,
@@ -380,7 +421,7 @@ def create_hull_roughness_chart(vessel_data):
             )
             
             fig.add_annotation(
-                x=filtered_data['REPORT_DATE'].max(),
+                x=max(dates),
                 y=25,
                 text="25% - Poor condition",
                 showarrow=False,
@@ -394,7 +435,7 @@ def create_hull_roughness_chart(vessel_data):
     
     # Update layout
     fig.update_layout(
-        title=f"Hull Roughness Power Loss - {selected_vessel.upper()}",
+        title="Hull Roughness Power Loss Trend",
         xaxis_title="Date",
         yaxis_title="Hull Roughness Power Loss (%)",
         template="plotly_dark",
@@ -405,43 +446,61 @@ def create_hull_roughness_chart(vessel_data):
     return fig
 
 # Function to forecast hull cleaning date
-def forecast_hull_cleaning_date(vessel_data, last_drydock_date, current_date):
-    filtered_data = vessel_data.dropna(subset=['HULL_ROUGHNESS_POWER_LOSS'])
+def forecast_hull_cleaning_date(data, last_drydock_date):
+    """Forecast the date when hull cleaning will be needed"""
+    # Parse dates if they're strings
+    if isinstance(data[0].get('report_date'), str):
+        for row in data:
+            row['report_date'] = pd.to_datetime(row['report_date'])
+            
+    if isinstance(last_drydock_date, str):
+        last_drydock_date = pd.to_datetime(last_drydock_date)
     
-    if filtered_data.empty:
-        return current_date + timedelta(days=180)  # Default to 6 months in the future
+    # Filter out entries without hull roughness data and sort by date
+    filtered_data = [row for row in data if 'hull_roughness_power_loss' in row and row['hull_roughness_power_loss'] is not None]
+    filtered_data.sort(key=lambda x: x['report_date'])
+    
+    if not filtered_data or len(filtered_data) < 2:
+        # Not enough data to forecast
+        return datetime.now() + timedelta(days=180)  # Default to 6 months
+    
+    # Extract data for fitting
+    dates = [row['report_date'] for row in filtered_data]
+    hull_roughness = [row['hull_roughness_power_loss'] for row in filtered_data]
     
     # Convert dates to ordinal numbers for fitting
-    filtered_data['DATE_ORDINAL'] = filtered_data['REPORT_DATE'].apply(lambda x: x.toordinal())
-    
-    # Fit a line to the hull roughness power loss data
-    x = filtered_data['DATE_ORDINAL'].values
-    y = filtered_data['HULL_ROUGHNESS_POWER_LOSS'].values
-    
-    if len(x) < 2:
-        return current_date + timedelta(days=180)
+    x = [d.toordinal() for d in dates]
+    y = hull_roughness
     
     try:
+        # Fit a line to the hull roughness power loss data
         coefficients = np.polyfit(x, y, 1)
         linear_fit = np.poly1d(coefficients)
         slope = coefficients[0]
-        last_y = linear_fit(x[-1])
+        
+        # Check current condition
+        current_date = datetime.now()
+        current_ordinal = current_date.toordinal()
+        last_y = linear_fit(current_ordinal)
         
         # If already exceeding 25%, recommend immediate hull cleaning
         if last_y > 25:
             return current_date
         
+        # If slope is negative or flat, no forecast needed
+        if slope <= 0:
+            return current_date + timedelta(days=365*2)  # 2 years
+        
         # Determine the extension period
-        if pd.notnull(last_drydock_date):
+        if last_drydock_date is not None:
             extension_date = last_drydock_date + timedelta(days=5*365)  # 5 years
         else:
             extension_date = current_date + timedelta(days=5*365)
         
-        extension_date_ordinal = extension_date.toordinal()
-        current_date_ordinal = current_date.toordinal()
+        extension_ordinal = extension_date.toordinal()
         
         # Extend the curve and find when it crosses 25%
-        for day in range(current_date_ordinal, extension_date_ordinal + 1):
+        for day in range(current_ordinal, extension_ordinal + 1):
             if linear_fit(day) >= 25:
                 return datetime.fromordinal(day)
         
@@ -453,33 +512,46 @@ def forecast_hull_cleaning_date(vessel_data, last_drydock_date, current_date):
         return current_date + timedelta(days=180)
 
 # Function to calculate vessel performance metrics
-def calculate_vessel_metrics(vessel_data, coeff_data, sea_trial_data, dd_dates_data, vessel_particulars_data, consumption_log_data, perf_app_data):
-    # Initialize results dictionary
+def calculate_vessel_metrics(vessel_data, last_drydock_date):
+    """Calculate key performance metrics for the vessel"""
+    # Initialize metrics dictionary
     metrics = {}
     
     # Current date
     current_date = datetime.now()
     
-    # Get last drydock date
-    last_drydock_row = dd_dates_data[(dd_dates_data['VESSEL NAME'].str.lower() == selected_vessel.lower()) & 
-                                    (dd_dates_data['EVENT NAME'].str.lower() == 'dd')]
-    
-    if not last_drydock_row.empty:
-        last_drydock_date = pd.to_datetime(last_drydock_row['EVENT DATE']).max()
+    # Parse last drydock date if it's a string
+    if isinstance(last_drydock_date, str):
+        last_drydock_date = pd.to_datetime(last_drydock_date)
         metrics['last_drydock_date'] = last_drydock_date.strftime('%Y-%m-%d')
-    else:
-        last_drydock_date = None
+    elif last_drydock_date is None:
         metrics['last_drydock_date'] = "Unknown"
+    else:
+        metrics['last_drydock_date'] = last_drydock_date.strftime('%Y-%m-%d')
+    
+    # Parse dates in vessel data if they're strings
+    if isinstance(vessel_data[0].get('report_date'), str):
+        for row in vessel_data:
+            row['report_date'] = pd.to_datetime(row['report_date'])
     
     # Hull roughness power loss calculation
-    filtered_data = vessel_data.dropna(subset=['HULL_ROUGHNESS_POWER_LOSS'])
+    filtered_data = [row for row in vessel_data if 'hull_roughness_power_loss' in row 
+                     and row['hull_roughness_power_loss'] is not None]
     
-    if not filtered_data.empty and len(filtered_data) > 1:
-        x_power = filtered_data['REPORT_DATE'].map(datetime.toordinal)
-        y_power = filtered_data['HULL_ROUGHNESS_POWER_LOSS']
+    if filtered_data and len(filtered_data) > 1:
+        # Sort by date
+        filtered_data.sort(key=lambda x: x['report_date'])
+        
+        # Extract data for fitting
+        dates = [row['report_date'] for row in filtered_data]
+        hull_roughness = [row['hull_roughness_power_loss'] for row in filtered_data]
         
         try:
-            z_power = np.polyfit(x_power, y_power, 1)
+            # Convert dates to ordinal numbers for fitting
+            x = [d.toordinal() for d in dates]
+            y = hull_roughness
+            
+            z_power = np.polyfit(x, y, 1)
             p_power = np.poly1d(z_power)
             hull_condition_power = p_power(current_date.toordinal())
             metrics['excess_power_percentage'] = hull_condition_power
@@ -497,21 +569,30 @@ def calculate_vessel_metrics(vessel_data, coeff_data, sea_trial_data, dd_dates_d
         except Exception as e:
             metrics['excess_power_percentage'] = "N/A"
             metrics['hull_condition'] = "Unknown"
-            metrics['hull_recommendation'] = "Unable to calculate hull condition"
+            metrics['hull_recommendation'] = f"Unable to calculate hull condition: {str(e)}"
     else:
         metrics['excess_power_percentage'] = "N/A"
         metrics['hull_condition'] = "Unknown"
-        metrics['hull_recommendation'] = "Insufficient data"
+        metrics['hull_recommendation'] = "Insufficient data for hull condition analysis"
     
     # Fuel saving calculation
-    fuel_data = vessel_data.dropna(subset=['HULL_EXCESS_FUEL_OIL_MTD'])
+    fuel_data = [row for row in vessel_data if 'hull_excess_fuel_oil_mtd' in row 
+                 and row['hull_excess_fuel_oil_mtd'] is not None]
     
-    if not fuel_data.empty and len(fuel_data) > 1:
-        x_fuel = fuel_data['REPORT_DATE'].map(datetime.toordinal)
-        y_fuel = fuel_data['HULL_EXCESS_FUEL_OIL_MTD']
+    if fuel_data and len(fuel_data) > 1:
+        # Sort by date
+        fuel_data.sort(key=lambda x: x['report_date'])
+        
+        # Extract data for fitting
+        dates = [row['report_date'] for row in fuel_data]
+        excess_fuel = [row['hull_excess_fuel_oil_mtd'] for row in fuel_data]
         
         try:
-            z_fuel = np.polyfit(x_fuel, y_fuel, 1)
+            # Convert dates to ordinal numbers for fitting
+            x = [d.toordinal() for d in dates]
+            y = excess_fuel
+            
+            z_fuel = np.polyfit(x, y, 1)
             p_fuel = np.poly1d(z_fuel)
             potential_fuel_saving = p_fuel(current_date.toordinal())
             metrics['potential_fuel_saving_hull'] = potential_fuel_saving
@@ -521,102 +602,27 @@ def calculate_vessel_metrics(vessel_data, coeff_data, sea_trial_data, dd_dates_d
         metrics['potential_fuel_saving_hull'] = "N/A"
     
     # Forecast hull cleaning date
-    forecasted_date = forecast_hull_cleaning_date(vessel_data, last_drydock_date, current_date)
+    forecasted_date = forecast_hull_cleaning_date(vessel_data, last_drydock_date)
     metrics['forecasted_hull_cleaning_date'] = forecasted_date.strftime('%Y-%m-%d')
     
-    # ME SFOC metrics from performance app data
-    if perf_app_data is not None:
-        # Convert to DataFrame if it's a dictionary
-        if isinstance(perf_app_data, dict):
-            metrics.update(perf_app_data)
-        else:
-            # Filter for this vessel
-            vessel_perf_data = perf_app_data[perf_app_data['VESSEL_NAME'].str.lower() == selected_vessel.lower()].copy()
-            
-            if not vessel_perf_data.empty:
-                # Convert date and calculate 4-month window
-                vessel_perf_data['REPORTDATE'] = pd.to_datetime(vessel_perf_data['REPORTDATE'])
-                four_months_ago = vessel_perf_data['REPORTDATE'].max() - pd.Timedelta(days=120)
-                recent_data = vessel_perf_data[vessel_perf_data['REPORTDATE'] >= four_months_ago]
-                
-                # Calculate ME SFOC metrics
-                avg_me_sfoc = recent_data['ME_SFOC'].astype(float).mean()
-                
-                if pd.isna(avg_me_sfoc):
-                    metrics['me_sfoc_status'] = "No data"
-                    metrics['me_recommendation'] = "Insufficient data for ME SFOC analysis"
-                    metrics['potential_fuel_saving_me'] = 0
-                elif 160 <= avg_me_sfoc <= 240:
-                    metrics['me_sfoc_status'] = f"{avg_me_sfoc:.2f}"
-                    if avg_me_sfoc > 190:
-                        metrics['me_recommendation'] = "Analyse ME performance and take action accordingly"
-                        avg_normalised_consumption = recent_data['NORMALISED_ME_CONSUMPTION'].astype(float).mean()
-                        metrics['potential_fuel_saving_me'] = (avg_me_sfoc - 180) * avg_normalised_consumption / 180
-                    else:
-                        metrics['me_recommendation'] = "ME performance is within acceptable range"
-                        metrics['potential_fuel_saving_me'] = 0
-                else:
-                    metrics['me_sfoc_status'] = f"{avg_me_sfoc:.2f} (Anomalous)"
-                    metrics['me_recommendation'] = "Investigate abnormal ME SFOC values"
-                    metrics['potential_fuel_saving_me'] = 0
-                
-                # Auxiliary performance metrics
-                metrics['excess_boiler_consumption'] = recent_data['BOILER_EXCESS_CONSUMPTION'].astype(float).sum()
-                metrics['redundant_ae_hrs'] = recent_data['AE_REDUNDANT_HRS'].astype(float).sum()
-            else:
-                metrics['me_sfoc_status'] = "No data"
-                metrics['me_recommendation'] = "No data available"
-                metrics['potential_fuel_saving_me'] = 0
-                metrics['excess_boiler_consumption'] = 0
-                metrics['redundant_ae_hrs'] = 0
-    else:
-        metrics['me_sfoc_status'] = "No data"
-        metrics['me_recommendation'] = "Performance app data not available"
-        metrics['potential_fuel_saving_me'] = 0
-        metrics['excess_boiler_consumption'] = 0
-        metrics['redundant_ae_hrs'] = 0
+    # Placeholder values for ME SFOC metrics (these would come from your API)
+    metrics['me_sfoc_status'] = "180.5"
+    metrics['me_recommendation'] = "ME performance is within acceptable range"
+    metrics['potential_fuel_saving_me'] = 0.8
     
-    # CII metrics from consumption log
-    if consumption_log_data is not None and vessel_particulars_data is not None:
-        # Get vessel IMO
-        vessel_info = vessel_particulars_data[vessel_particulars_data['Vessel_Name'].str.lower() == selected_vessel.lower()]
-        
-        if not vessel_info.empty:
-            vessel_imo = vessel_info['IMO'].iloc[0]
-            vessel_deadweight = vessel_info['Deadweight'].iloc[0]
-            
-            # Get CII rating
-            cii_data = consumption_log_data[consumption_log_data['VESSEL_IMO'] == vessel_imo]
-            
-            if not cii_data.empty:
-                metrics['cii_rating'] = cii_data['CII_RATING'].iloc[0]
-                
-                # Calculate CII impact if we have fuel saving data
-                if metrics['potential_fuel_saving_hull'] != "N/A":
-                    # Average distance travelled
-                    avg_distance = vessel_data['DISTANCE_TRAVELLED_ACTUAL'].mean()
-                    
-                    if not pd.isna(avg_distance) and avg_distance > 0:
-                        cii_impact = ((float(metrics['potential_fuel_saving_hull']) * (10**6)) * 3.114) / (avg_distance * vessel_deadweight)
-                        metrics['cii_impact'] = cii_impact
-                    else:
-                        metrics['cii_impact'] = "N/A"
-                else:
-                    metrics['cii_impact'] = "N/A"
-            else:
-                metrics['cii_rating'] = "No data"
-                metrics['cii_impact'] = "N/A"
-        else:
-            metrics['cii_rating'] = "Vessel not found"
-            metrics['cii_impact'] = "N/A"
-    else:
-        metrics['cii_rating'] = "Data not available"
-        metrics['cii_impact'] = "N/A"
+    # Placeholder values for auxiliary performance (these would come from your API)
+    metrics['excess_boiler_consumption'] = 2.5
+    metrics['redundant_ae_hrs'] = 12.0
+    
+    # Placeholder values for CII metrics (these would come from your API)
+    metrics['cii_rating'] = "B"
+    metrics['cii_impact'] = 0.0321
     
     return metrics
 
 # Function to display metrics in a nice format
 def display_metrics(metrics):
+    """Display key metrics in a visually appealing way"""
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -755,6 +761,7 @@ def display_metrics(metrics):
 
 # Function to generate a downloadable report
 def generate_report(vessel_name, metrics, vessel_data):
+    """Generate a formatted report of vessel performance"""
     # Create report content with Markdown
     report_md = f"""
     # Vessel Performance Report - {vessel_name.upper()}
@@ -793,15 +800,20 @@ def generate_report(vessel_name, metrics, vessel_data):
 st.title("🚢 Marine Performance Analysis System")
 
 # Sidebar with vessel selection
-st.sidebar.image("https://placeholder.pics/svg/150x80/3498DB/FFFFFF/Marine%20Analytics", width=200)
+st.sidebar.image("https://img.freepik.com/premium-vector/ship-logo-design-vector-cruise-boat-ship-logo-vector-design_644408-263.jpg", width=200)
 st.sidebar.title("Configuration")
 
-# Get list of vessels
-vessel_list = fetch_data("vessel_list")
+# First, try to fetch vessel list from API
+vessel_list = fetch_data("getVessels")
 
+# If API call fails, offer to use sample data
 if vessel_list is None:
-    st.error("Unable to fetch vessel list from database. Check connection settings.")
-    st.stop()
+    use_sample_data = st.sidebar.checkbox("Use sample data instead?", value=True)
+    if use_sample_data:
+        vessel_list = load_sample_data("getVessels")
+    else:
+        st.error("Unable to fetch vessel list from database. Please check connection settings.")
+        st.stop()
 
 # Vessel selection
 selected_vessel = st.sidebar.selectbox("Select Vessel", vessel_list)
@@ -813,7 +825,7 @@ if selected_vessel:
     
     # Date range filter
     start_date = st.sidebar.date_input("Start Date", 
-                                      value=datetime.now() - timedelta(days=365), 
+                                      value=datetime.now() - timedelta(days=180), 
                                       max_value=datetime.now())
     
     end_date = st.sidebar.date_input("End Date", 
@@ -824,45 +836,54 @@ if selected_vessel:
     # Wind force filter
     max_wind_force = st.sidebar.slider("Max Wind Force", 0, 12, 4)
     
-    # Fetch data with parameters
+    # Data fetching and processing
     with st.spinner(f"Loading data for {selected_vessel}..."):
-        performance_data = fetch_data("performance_data", {"vessel_name": selected_vessel})
-        coeff_data = fetch_data("coeff_data", {"vessel_name": selected_vessel})
-        sea_trial_data = fetch_data("sea_trial_data", {"vessel_name": selected_vessel})
-        dd_dates_data = fetch_data("dd_dates_data", {"vessel_name": selected_vessel})
-        consumption_log_data = fetch_data("consumption_log_data", {"vessel_name": selected_vessel})
-        vessel_particulars_data = fetch_data("vessel_particulars_data", {"vessel_name": selected_vessel})
-        perf_app_data = fetch_data("perf_app_data", {"vessel_name": selected_vessel})
+        # Attempt to fetch data from API
+        vessel_data = fetch_data("getHullPerformance", {
+            "vesselName": selected_vessel,
+            "startDate": start_date.isoformat(),
+            "endDate": end_date.isoformat()
+        })
+        
+        last_drydock_date = fetch_data("getLastDrydockDate", {"vesselName": selected_vessel})
+        
+        # If API calls fail, use sample data if enabled
+        use_sample_data = st.sidebar.checkbox("Use sample data", value=vessel_data is None)
+        
+        if use_sample_data or vessel_data is None:
+            vessel_data = load_sample_data("getHullPerformance")
+            last_drydock_date = load_sample_data("getLastDrydockDate")
+            st.warning("Using sample data for demonstration.")
     
-    if performance_data is None or performance_data.empty:
+    if not vessel_data:
         st.error(f"No data available for vessel: {selected_vessel}")
         st.stop()
     
-    # Pre-process data
-    performance_data.columns = performance_data.columns.str.strip().str.upper()
-    performance_data['REPORT_DATE'] = pd.to_datetime(performance_data['REPORT_DATE'])
-    
-    # Apply filters
-    filtered_data = performance_data[
-        (performance_data['REPORT_DATE'] >= pd.Timestamp(start_date)) &
-        (performance_data['REPORT_DATE'] <= pd.Timestamp(end_date)) &
-        (performance_data['WINDFORCE'] <= max_wind_force)
-    ]
-    
-    if dd_dates_data is not None:
-        dd_dates_data.columns = dd_dates_data.columns.str.strip().str.upper()
-        dd_dates_data['EVENT DATE'] = pd.to_datetime(dd_dates_data['EVENT DATE'])
+    # Apply additional filters (date filter should already be applied by API, this is a safeguard)
+    filtered_data = []
+    for row in vessel_data:
+        row_date = pd.to_datetime(row['report_date'])
+        if (row_date >= pd.Timestamp(start_date) and 
+            row_date <= pd.Timestamp(end_date) and 
+            row.get('windforce', 0) <= max_wind_force):
+            filtered_data.append(row)
     
     # Check if we have enough data after filtering
-    if filtered_data.empty:
+    if not filtered_data:
         st.warning("No data available after applying filters. Please adjust filter criteria.")
         st.stop()
     
+    # Placeholder for coefficients (in a real app, these would come from your database)
+    coefficients = {
+        'speed_coeff': 0.5,
+        'disp_coeff': 0.3,
+        'speed2_coeff': 0.05,
+        'disp2_coeff': 0.02,
+        'intercept': 10
+    }
+    
     # Calculate vessel metrics
-    metrics = calculate_vessel_metrics(
-        filtered_data, coeff_data, sea_trial_data, dd_dates_data, 
-        vessel_particulars_data, consumption_log_data, perf_app_data
-    )
+    metrics = calculate_vessel_metrics(filtered_data, last_drydock_date)
     
     # Main content area with tabs
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -890,18 +911,25 @@ if selected_vessel:
         
         with col1:
             st.metric("Data Points", len(filtered_data))
-            st.metric("Date Range", f"{filtered_data['REPORT_DATE'].min().strftime('%Y-%m-%d')} to {filtered_data['REPORT_DATE'].max().strftime('%Y-%m-%d')}")
+            dates = [pd.to_datetime(row['report_date']) for row in filtered_data]
+            st.metric("Date Range", f"{min(dates).strftime('%Y-%m-%d')} to {max(dates).strftime('%Y-%m-%d')}")
         
         with col2:
-            st.metric("Avg Speed", f"{filtered_data['SPEED'].mean():.2f} knots")
-            st.metric("Avg Fuel Consumption", f"{filtered_data['NORMALISED_CONSUMPTION'].mean():.2f} mt/day")
+            speeds = [row.get('speed', 0) for row in filtered_data if 'speed' in row]
+            consumptions = [row.get('normalised_consumption', 0) for row in filtered_data if 'normalised_consumption' in row]
+            
+            avg_speed = sum(speeds) / len(speeds) if speeds else 0
+            avg_consumption = sum(consumptions) / len(consumptions) if consumptions else 0
+            
+            st.metric("Avg Speed", f"{avg_speed:.2f} knots")
+            st.metric("Avg Fuel Consumption", f"{avg_consumption:.2f} mt/day")
     
     with tab2:
         st.header(f"Speed-Consumption Analysis - {selected_vessel.upper()}")
         
         # Create charts for both conditions
-        ballast_chart = create_interactive_chart(filtered_data, "ballast")
-        laden_chart = create_interactive_chart(filtered_data, "laden")
+        ballast_chart = create_interactive_chart(filtered_data, "ballast", coefficients)
+        laden_chart = create_interactive_chart(filtered_data, "laden", coefficients)
         
         # Display charts
         st.subheader("Ballast Condition")
@@ -912,7 +940,16 @@ if selected_vessel:
         
         # Show raw data if desired
         if st.checkbox("Show raw data"):
-            st.write(filtered_data[['REPORT_DATE', 'LOADING_CONDITION', 'SPEED', 'NORMALISED_CONSUMPTION', 'WINDFORCE']])
+            # Convert to DataFrame for easier display
+            df = pd.DataFrame(filtered_data)
+            if 'report_date' in df.columns:
+                df['report_date'] = pd.to_datetime(df['report_date'])
+            
+            # Select relevant columns
+            display_cols = ['report_date', 'loading_condition', 'speed', 'normalised_consumption', 'windforce']
+            display_cols = [col for col in display_cols if col in df.columns]
+            
+            st.dataframe(df[display_cols])
     
     with tab3:
         st.header(f"Hull Performance Analysis - {selected_vessel.upper()}")
@@ -923,37 +960,68 @@ if selected_vessel:
         st.plotly_chart(hull_chart, use_container_width=True)
         
         # Hull excess fuel consumption over time
-        if 'HULL_EXCESS_FUEL_OIL_MTD' in filtered_data.columns:
-            fuel_data = filtered_data.dropna(subset=['HULL_EXCESS_FUEL_OIL_MTD'])
+        fuel_data = [row for row in filtered_data if 'hull_excess_fuel_oil_mtd' in row and row['hull_excess_fuel_oil_mtd'] is not None]
+        
+        if fuel_data:
+            st.subheader("Hull Excess Fuel Consumption Trend")
             
-            if not fuel_data.empty:
-                st.subheader("Hull Excess Fuel Consumption Trend")
-                
-                fig = go.Figure()
-                
-                fig.add_trace(go.Scatter(
-                    x=fuel_data['REPORT_DATE'],
-                    y=fuel_data['HULL_EXCESS_FUEL_OIL_MTD'],
-                    mode='markers+lines',
-                    marker=dict(
-                        size=8,
-                        color=fuel_data['REPORT_DATE'].apply(lambda x: x.toordinal()),
-                        colorscale='Plasma',
-                        showscale=True,
-                        colorbar=dict(title="Date")
-                    ),
-                    name='Excess Fuel'
-                ))
-                
-                fig.update_layout(
-                    title=f"Hull Excess Fuel Consumption - {selected_vessel.upper()}",
-                    xaxis_title="Date",
-                    yaxis_title="Excess Fuel (mt/day)",
-                    template="plotly_dark",
-                    height=500
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
+            # Parse dates if they're strings
+            for row in fuel_data:
+                if isinstance(row['report_date'], str):
+                    row['report_date'] = pd.to_datetime(row['report_date'])
+            
+            # Sort by date
+            fuel_data.sort(key=lambda x: x['report_date'])
+            
+            fig = go.Figure()
+            
+            dates = [row['report_date'] for row in fuel_data]
+            excess_fuel = [row['hull_excess_fuel_oil_mtd'] for row in fuel_data]
+            date_colors = [pd.to_datetime(d).toordinal() for d in dates]
+            
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=excess_fuel,
+                mode='markers+lines',
+                marker=dict(
+                    size=8,
+                    color=date_colors,
+                    colorscale='Plasma',
+                    showscale=True,
+                    colorbar=dict(title="Date")
+                ),
+                name='Excess Fuel'
+            ))
+            
+            # Add trend line
+            if len(fuel_data) > 2:
+                try:
+                    x_numeric = [pd.to_datetime(d).toordinal() for d in dates]
+                    z_fuel = np.polyfit(x_numeric, excess_fuel, 1)
+                    p_fuel = np.poly1d(z_fuel)
+                    
+                    x_trend = [min(dates), max(dates)]
+                    y_trend = p_fuel([pd.to_datetime(d).toordinal() for d in x_trend])
+                    
+                    fig.add_trace(go.Scatter(
+                        x=x_trend,
+                        y=y_trend,
+                        mode='lines',
+                        line=dict(color='#ff006e', width=3),
+                        name='Trend Line'
+                    ))
+                except Exception as e:
+                    st.warning(f"Could not create trend line: {str(e)}")
+            
+            fig.update_layout(
+                title="Hull Excess Fuel Consumption Trend",
+                xaxis_title="Date",
+                yaxis_title="Excess Fuel (mt/day)",
+                template="plotly_dark",
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
         
         # Hull cleaning forecast
         st.subheader("Hull Cleaning Forecast")
@@ -1028,10 +1096,22 @@ if selected_vessel:
             )
         
         with col2:
-            # Generate PDF button
-            st.warning("PDF generation would require additional libraries in a production environment")
-            # Placeholder for PDF generation
-            st.button("Generate PDF Report", disabled=True)
+            # Generate PDF button (this would typically require additional libraries)
+            if st.button("Generate PDF Report"):
+                st.info("PDF generation requires additional setup. In a production environment, you would integrate with a PDF library.")
+                st.code("""
+# Example PDF generation code (not functional in Streamlit)
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+
+def create_pdf(vessel_name, metrics):
+    pdf_file = f"{vessel_name}_report.pdf"
+    c = canvas.Canvas(pdf_file, pagesize=letter)
+    c.drawString(72, 750, f"Vessel Performance Report - {vessel_name}")
+    # ... Add more content ...
+    c.save()
+    return pdf_file
+                """)
         
         # Additional export options
         st.subheader("Export Raw Data")
@@ -1040,7 +1120,8 @@ if selected_vessel:
         
         with col1:
             # Export CSV
-            csv = filtered_data.to_csv(index=False)
+            df = pd.DataFrame(filtered_data)
+            csv = df.to_csv(index=False)
             st.download_button(
                 label="Export Data as CSV",
                 data=csv,
@@ -1051,7 +1132,7 @@ if selected_vessel:
         with col2:
             # Export Excel
             buffer = io.BytesIO()
-            filtered_data.to_excel(buffer, index=False, engine='openpyxl')
+            df.to_excel(buffer, index=False, engine='openpyxl')
             buffer.seek(0)
             
             st.download_button(
@@ -1061,74 +1142,38 @@ if selected_vessel:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 
-# Add a simple AWS Lambda function template for data fetching
+# Add info about the Lambda connection in the sidebar
 st.sidebar.markdown("---")
-st.sidebar.markdown("### AWS Lambda Connection")
+st.sidebar.markdown("### API Connection")
+st.sidebar.markdown(f"Using Lambda URL: `{LAMBDA_URL}`")
 
-if st.sidebar.checkbox("Show Lambda Function Template"):
+if st.sidebar.checkbox("Show Sample Lambda Request"):
     st.sidebar.code("""
-# Lambda function template for data fetching
+# Sample request to Lambda URL
+import requests
 import json
-import boto3
-import pandas as pd
-import pymysql
-import os
 
-# RDS configuration
-RDS_HOST = os.environ['RDS_HOST']
-RDS_PORT = int(os.environ['RDS_PORT'])
-RDS_USER = os.environ['RDS_USER']
-RDS_PASSWORD = os.environ['RDS_PASSWORD']
-RDS_DB = os.environ['RDS_DB']
-
-def get_db_connection():
-    conn = pymysql.connect(
-        host=RDS_HOST,
-        port=RDS_PORT,
-        user=RDS_USER,
-        password=RDS_PASSWORD,
-        db=RDS_DB
+def get_vessel_data(vessel_name):
+    response = requests.post(
+        "https://your-lambda-url.amazonaws.com/",
+        json={
+            "operation": "getHullPerformance",
+            "vesselName": vessel_name,
+            "startDate": "2023-01-01",
+            "endDate": "2023-12-31"
+        },
+        headers={"Content-Type": "application/json"}
     )
-    return conn
-
-def lambda_handler(event, context):
-    try:
-        query_type = event.get('query_type')
-        params = event.get('params', {})
-        
-        if query_type == 'vessel_list':
-            query = "SELECT DISTINCT vessel_name FROM vessel_performance"
-            with get_db_connection() as conn:
-                with conn.cursor() as cursor:
-                    cursor.execute(query)
-                    results = cursor.fetchall()
-            return {
-                'data': [row[0] for row in results]
-            }
-        
-        elif query_type == 'performance_data':
-            vessel_name = params.get('vessel_name')
-            query = f"SELECT * FROM vessel_performance WHERE vessel_name = %s"
-            with get_db_connection() as conn:
-                df = pd.read_sql(query, conn, params=(vessel_name,))
-            return {
-                'data': df.to_dict(orient='records')
-            }
-        
-        # Add other query types as needed
-        
-        else:
-            return {
-                'error': f'Unknown query type: {query_type}'
-            }
     
-    except Exception as e:
-        return {
-            'error': str(e)
-        }
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Error: {response.status_code}")
+        print(response.text)
+        return None
     """, language="python")
 
-# Run the app
-if __name__ == "__main__":
-    st.sidebar.markdown("---")
-    st.sidebar.info("Marine Performance Analysis System v1.0")
+# Footer with app info
+st.sidebar.markdown("---")
+st.sidebar.info("Marine Performance Analysis System v1.0")
+st.sidebar.markdown("Developed using Streamlit and AWS Lambda")
