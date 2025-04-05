@@ -1,6 +1,8 @@
 import streamlit as st
 import datetime
 import pandas as pd
+import os
+os.environ['STREAMLIT_LOG_LEVEL'] = 'debug'
 
 # Import the agents
 from agents.hull_performance import HullPerformanceAgent
