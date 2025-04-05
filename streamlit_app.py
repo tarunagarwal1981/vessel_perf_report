@@ -4,7 +4,7 @@ import pandas as pd
 import traceback
 import os
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 
 # For debug logging
 os.environ['STREAMLIT_LOG_LEVEL'] = 'debug'
