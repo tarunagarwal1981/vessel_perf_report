@@ -154,7 +154,6 @@ class AdvancedReportGenerator:
                     except Exception as e:
                         st.error(f"Error generating report: {str(e)}")
                         st.code(traceback.format_exc())
-    
     def _get_hull_metrics(self, vessel_data, hull_agent):
         try:
             # Filter data for power loss
@@ -163,20 +162,20 @@ class AdvancedReportGenerator:
                 if 'report_date' in entry and 'hull_roughness_power_loss' in entry:
                     if entry['hull_roughness_power_loss'] is not None:
                         filtered_data.append(entry)
-            
+    
             if filtered_data:
                 # Sort by date
                 filtered_data.sort(key=lambda x: pd.to_datetime(x['report_date']))
-                
+    
                 # Get latest power loss
                 power_loss = filtered_data[-1].get('hull_roughness_power_loss', 0)
-                
+    
                 # Get condition
                 condition, _ = hull_agent.get_hull_condition(power_loss)
-                
+    
                 # Calculate savings (formula can be adjusted)
                 fuel_savings = (power_loss - 15) * 0.05 if power_loss > 15 else 0
-                
+    
                 # Generate recommendation
                 if power_loss < 15:
                     recommendation = "Hull and propeller performance is good. No action required."
@@ -184,10 +183,11 @@ class AdvancedReportGenerator:
                     recommendation = "Consider hull cleaning at next convenient opportunity."
                 else:
                     recommendation = "Hull cleaning recommended as soon as possible."
-                
+    
                 return condition, power_loss, fuel_savings, recommendation
             else:
                 return "Unknown", 0, 0, "Insufficient data to provide recommendation."
+    
         except Exception as e:
             print(f"Error extracting hull metrics: {str(e)}")
             return "Error", 0, 0, f"Error analyzing hull performance: {str(e)}"
