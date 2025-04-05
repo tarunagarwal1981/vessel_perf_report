@@ -72,7 +72,7 @@ else:
                 # Initialize the agents
                 hull_agent = HullPerformanceAgent()
                 speed_agent = SpeedConsumptionAgent()
-                report_agent = ReportGeneratorAgent()  # Initialize the report generator
+                report_agent = MinimalReportGenerator()  # Initialize the report generator
                 
                 # Hull Performance Tab
                 with main_tab1:
