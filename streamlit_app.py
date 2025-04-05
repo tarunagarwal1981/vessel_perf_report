@@ -130,13 +130,11 @@ def get_hull_condition(hull_roughness):
 # App title
 st.title("🚢 Marine Hull Performance Analysis")
 
-# Sidebar for vessel selection and date range
+# Sidebar for vessel input and date range
 st.sidebar.header("Configuration")
 
-# For simplicity, we'll hardcode a few vessel names
-# In the full version, this would come from the Lambda function
-vessel_options = ["VESSEL_A", "VESSEL_B", "VESSEL_C"]
-selected_vessel = st.sidebar.selectbox("Select Vessel", vessel_options)
+# User input for vessel name
+selected_vessel = st.sidebar.text_input("Enter Vessel Name", "")
 
 # Date selectors
 st.sidebar.subheader("Date Range")
@@ -149,10 +147,12 @@ end_date = st.sidebar.date_input("End Date", value=end_date)
 # Check if dates are valid
 if start_date > end_date:
     st.error("Error: Start date must be before end date")
+elif not selected_vessel:
+    st.info("Please enter a vessel name in the sidebar.")
 else:
     # Button to fetch data
     if st.sidebar.button("Analyze Hull Performance"):
-        with st.spinner("Fetching hull performance data..."):
+        with st.spinner(f"Fetching hull performance data for {selected_vessel}..."):
             # Call Lambda function to get hull performance data
             params = {
                 "vesselName": selected_vessel,
@@ -162,7 +162,7 @@ else:
             
             hull_data = fetch_data_from_lambda("getHullPerformance", params)
             
-            if hull_data:
+            if hull_data and len(hull_data) > 0:
                 # Sort data by date
                 hull_data.sort(key=lambda x: x['report_date'])
                 
@@ -204,10 +204,10 @@ else:
                         df['report_date'] = pd.to_datetime(df['report_date'])
                     st.dataframe(df)
             else:
-                st.error("No hull performance data available for the selected vessel and date range.")
+                st.error(f"No hull performance data available for {selected_vessel} in the selected date range.")
     else:
         # Initial instruction
-        st.info("👈 Select a vessel and date range, then click 'Analyze Hull Performance' to view the analysis.")
+        st.info("👈 Enter a vessel name and select a date range, then click 'Analyze Hull Performance' to view the analysis.")
 
 # Footer
 st.sidebar.markdown("---")
