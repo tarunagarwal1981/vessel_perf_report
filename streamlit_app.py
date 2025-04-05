@@ -76,8 +76,7 @@ def create_hull_roughness_chart(data):
             colorscale='Plasma',  # Neon-like colorscale
             showscale=True,
             colorbar=dict(
-                title="Days",
-                titleside="right"
+                title="Days Since First Data Point"  # Corrected: removed titleside property
             )
         ),
         name='Hull Roughness Data'
