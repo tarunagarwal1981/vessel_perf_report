@@ -55,15 +55,14 @@ def create_hull_roughness_chart(data):
     # Create figure
     fig = go.Figure()
     
-    # Add scatter plot
+    # Add scatter plot with fixed color instead of dynamic coloring
     fig.add_trace(go.Scatter(
         x=dates,
         y=hull_roughness,
         mode='markers+lines',
         marker=dict(
             size=8,
-            color=range(len(dates)),
-            colorscale='Plasma'
+            color='#1f77b4'  # Use a fixed color instead of dynamic coloring
         ),
         name='Hull Roughness'
     ))
@@ -163,15 +162,26 @@ else:
             hull_data = fetch_data_from_lambda("getHullPerformance", params)
             
             if hull_data and len(hull_data) > 0:
+                # Ensure all entries have the necessary fields
+                filtered_data = []
+                for entry in hull_data:
+                    if 'report_date' in entry and 'hull_roughness_power_loss' in entry:
+                        if entry['hull_roughness_power_loss'] is not None:
+                            filtered_data.append(entry)
+                
+                if not filtered_data:
+                    st.error(f"No valid hull performance data found for {selected_vessel}.")
+                    st.stop()
+                
                 # Sort data by date
-                hull_data.sort(key=lambda x: x['report_date'])
+                filtered_data.sort(key=lambda x: pd.to_datetime(x['report_date']))
                 
                 # Create two columns for metrics
                 col1, col2 = st.columns(2)
                 
                 # Calculate current hull condition
                 # Get the latest hull roughness value
-                latest_data = max(hull_data, key=lambda x: x['report_date'])
+                latest_data = max(filtered_data, key=lambda x: pd.to_datetime(x['report_date']))
                 latest_roughness = latest_data.get('hull_roughness_power_loss', 0)
                 condition, color = get_hull_condition(latest_roughness)
                 
@@ -192,14 +202,18 @@ else:
                 
                 # Display hull roughness chart
                 st.subheader("Hull Roughness Trend")
-                chart = create_hull_roughness_chart(hull_data)
-                if chart:
-                    st.plotly_chart(chart, use_container_width=True)
+                
+                try:
+                    chart = create_hull_roughness_chart(filtered_data)
+                    if chart:
+                        st.plotly_chart(chart, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error creating chart: {str(e)}")
                 
                 # Display the raw data
                 with st.expander("View Raw Data"):
                     # Convert to DataFrame for display
-                    df = pd.DataFrame(hull_data)
+                    df = pd.DataFrame(filtered_data)
                     if 'report_date' in df.columns:
                         df['report_date'] = pd.to_datetime(df['report_date'])
                     st.dataframe(df)
