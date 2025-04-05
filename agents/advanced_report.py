@@ -165,7 +165,7 @@ class AdvancedReportGenerator:
     
             if filtered_data:
                 # Sort by date
-                filtered_data.sort(key=lambda x: pd.to_datetime(x['report_date']))  # Remove extra ')'
+                filtered_data.sort(key=lambda x: pd.to_datetime(x['report_date']))
     
                 # Get latest power loss
                 power_loss = filtered_data[-1].get('hull_roughness_power_loss', 0)
@@ -189,10 +189,16 @@ class AdvancedReportGenerator:
                 return "Unknown", 0, 0, "Insufficient data to provide recommendation."
     
         except Exception as e:
-            # print(f"Error extracting hull metrics: {str(e)}")
-            # return "Error", 0, 0, f"Error analyzing hull performance: {str(e)}"
-            return "Error", 0, 0, str(e)    
-            
+            # Print error for debugging
+            print(f"Error extracting hull metrics: {str(e)}")
+            # Return default/error values
+            return "Error", 0, 0, str(e)
+        
+            except Exception as e:
+                # print(f"Error extracting hull metrics: {str(e)}")
+                # return "Error", 0, 0, f"Error analyzing hull performance: {str(e)}"
+                return "Error", 0, 0, str(e)    
+                
     def _get_speed_metrics(self, vessel_data):
         try:
             # Filter data for speed-consumption
