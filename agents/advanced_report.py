@@ -194,10 +194,7 @@ class AdvancedReportGenerator:
             # Return default/error values
             return "Error", 0, 0, str(e)
         
-            except Exception as e:
-                # print(f"Error extracting hull metrics: {str(e)}")
-                # return "Error", 0, 0, f"Error analyzing hull performance: {str(e)}"
-                return "Error", 0, 0, str(e)    
+            
                 
     def _get_speed_metrics(self, vessel_data):
         try:
