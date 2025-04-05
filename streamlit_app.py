@@ -10,7 +10,7 @@ os.environ['STREAMLIT_LOG_LEVEL'] = 'debug'
 # Import the agents
 from agents.hull_performance import HullPerformanceAgent
 from agents.speed_consumption import SpeedConsumptionAgent
-from agents.minimal_report import MinimalReportGenerator  # Use the minimal report generator
+from agents.advanced_report import AdvancedReportGenerator
 from utils.data_fetcher import fetch_data_from_lambda
 
 # Initialize session state for persistence
@@ -137,7 +137,7 @@ else:
             # Initialize the agents
             hull_agent = HullPerformanceAgent()
             speed_agent = SpeedConsumptionAgent()
-            report_agent = MinimalReportGenerator()
+            report_agent = AdvancedReportGenerator()
             
             # Hull Performance Tab
             with main_tab1:
