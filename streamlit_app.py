@@ -3,8 +3,6 @@ import datetime
 import pandas as pd
 import traceback
 import os
-print("Current working directory:", os.getcwd())
-print("Python path:", sys.path)
 
 
 # For debug logging
