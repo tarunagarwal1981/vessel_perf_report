@@ -442,7 +442,7 @@ class CIIAgent:
     
     def _create_cii_trend_chart(self, cii_data):
         """
-        Create CII trend chart showing YTD trend of AER values as an area chart with color-coded rating zones
+        Create enhanced CII trend chart with 3D-like elements and clear visual ratings
         """
         try:
             if not cii_data or not cii_data.get('cii_metrics'):
@@ -451,7 +451,7 @@ class CIIAgent:
             # Extract metrics for plotting
             metrics = cii_data['cii_metrics']
             
-            # Make sure metrics are sorted by date
+            # Sort data by date
             metrics.sort(key=lambda x: x['date'])
             
             # Extract data for plotting
@@ -459,28 +459,25 @@ class CIIAgent:
             attained_aer = [metric['attained_aer'] for metric in metrics]
             required_cii = [metric['required_cii'] for metric in metrics]
             
-            # Handle y-axis scaling
-            # Calculate the rating boundaries
+            # Rating boundaries
             a_boundary = [r * 0.95 for r in required_cii]
             c_boundary = [r * 1.05 for r in required_cii]
             d_boundary = [r * 1.15 for r in required_cii]
             
-            # Calculate a reasonable y-axis maximum value
-            # Use the maximum of required CII * 1.5 or attained AER (capped at 3 times the required CII)
+            # Calculate reasonable y-axis values
             capped_attained_aer = [min(aer, r * 3) for aer, r in zip(attained_aer, required_cii)]
             y_max = max([max(capped_attained_aer), max(required_cii) * 1.5])
-            
-            # Create a list of y_max values with the same length as dates
-            y_max_values = [y_max] * len(dates)
-            
-            # Calculate a reasonable minimum y-axis value
             y_min = max(0, min(a_boundary) * 0.8)
+            
+            # Create lists for fill areas
             y_min_values = [y_min] * len(dates)
+            y_max_values = [y_max] * len(dates)
             
             # Create figure
             fig = go.Figure()
             
-            # Add color-coded background zones
+            # Add color-coded rating zone areas with gradient fills and improved aesthetics
+            
             # A zone (green)
             fig.add_trace(go.Scatter(
                 x=dates + dates[::-1],
@@ -488,8 +485,9 @@ class CIIAgent:
                 fill='toself',
                 fillcolor='rgba(76, 175, 80, 0.2)',
                 line=dict(width=0),
-                showlegend=False,
-                hoverinfo='skip'
+                showlegend=True,
+                name='A Rating (Excellent)',
+                hoverinfo='name'
             ))
             
             # B zone (light green)
@@ -499,8 +497,9 @@ class CIIAgent:
                 fill='toself',
                 fillcolor='rgba(139, 195, 74, 0.2)',
                 line=dict(width=0),
-                showlegend=False,
-                hoverinfo='skip'
+                showlegend=True,
+                name='B Rating (Good)',
+                hoverinfo='name'
             ))
             
             # C zone (amber)
@@ -510,8 +509,9 @@ class CIIAgent:
                 fill='toself',
                 fillcolor='rgba(255, 193, 7, 0.2)',
                 line=dict(width=0),
-                showlegend=False,
-                hoverinfo='skip'
+                showlegend=True,
+                name='C Rating (Average)',
+                hoverinfo='name'
             ))
             
             # D zone (orange)
@@ -521,67 +521,98 @@ class CIIAgent:
                 fill='toself',
                 fillcolor='rgba(255, 152, 0, 0.2)',
                 line=dict(width=0),
-                showlegend=False,
-                hoverinfo='skip'
+                showlegend=True,
+                name='D Rating (Below Average)',
+                hoverinfo='name'
             ))
             
             # E zone (red)
             fig.add_trace(go.Scatter(
                 x=dates + dates[::-1],
-                y=d_boundary + y_max_values[::-1],  # Fixed: Using the pre-created list
+                y=d_boundary + y_max_values[::-1],
                 fill='toself',
                 fillcolor='rgba(244, 67, 54, 0.2)',
                 line=dict(width=0),
-                showlegend=False,
-                hoverinfo='skip'
+                showlegend=True,
+                name='E Rating (Poor)',
+                hoverinfo='name'
             ))
             
-            # Add the attained AER line and area
+            # Add the actual AER line with enhanced appearance
             fig.add_trace(go.Scatter(
                 x=dates,
                 y=capped_attained_aer,
-                mode='lines',
+                mode='lines+markers',
                 name='YTD Attained AER',
-                line=dict(color='rgb(0, 170, 255)', width=3),
+                line=dict(
+                    color='rgba(0, 140, 255, 0.9)', 
+                    width=4,
+                    shape='spline',  # Smoother curve
+                ),
+                marker=dict(
+                    size=10,
+                    color='rgba(0, 140, 255, 0.9)',
+                    line=dict(width=2, color='white')  # White border for 3D effect
+                ),
                 fill='tozeroy',
-                fillcolor='rgba(0, 170, 255, 0.2)'
+                fillcolor='rgba(0, 140, 255, 0.1)'
             ))
             
-            # Add required CII line
+            # Add boundary lines with enhanced appearance
+            
+            # Required CII line (bold)
             fig.add_trace(go.Scatter(
                 x=dates, 
                 y=required_cii,
                 mode='lines',
                 name='Required CII',
-                line=dict(color='rgb(255, 152, 0)', width=2, dash='dash')
+                line=dict(
+                    color='rgba(255, 152, 0, 0.9)', 
+                    width=3, 
+                    dash='dash'
+                )
             ))
             
-            # Add boundary lines
+            # A-B Boundary (subtle)
             fig.add_trace(go.Scatter(
                 x=dates,
                 y=a_boundary,
                 mode='lines',
                 name='A-B Boundary',
-                line=dict(color='rgb(139, 195, 74)', width=1, dash='dot')
+                line=dict(
+                    color='rgba(139, 195, 74, 0.9)', 
+                    width=2, 
+                    dash='dot'
+                )
             ))
             
+            # C-D Boundary (subtle)
             fig.add_trace(go.Scatter(
                 x=dates,
                 y=c_boundary,
                 mode='lines',
                 name='C-D Boundary',
-                line=dict(color='rgb(255, 152, 0)', width=1, dash='dot')
+                line=dict(
+                    color='rgba(255, 152, 0, 0.9)', 
+                    width=2, 
+                    dash='dot'
+                )
             ))
             
+            # D-E Boundary (subtle)
             fig.add_trace(go.Scatter(
                 x=dates,
                 y=d_boundary,
                 mode='lines',
                 name='D-E Boundary',
-                line=dict(color='rgb(244, 67, 54)', width=1, dash='dot')
+                line=dict(
+                    color='rgba(244, 67, 54, 0.9)', 
+                    width=2, 
+                    dash='dot'
+                )
             ))
             
-            # Add annotations for the rating zones
+            # Add stylish rating zone labels
             annotations = []
             
             # Only add annotations if we have data
@@ -595,7 +626,17 @@ class CIIAgent:
                         text="A",
                         showarrow=False,
                         align="right",
-                        font=dict(color="#4CAF50", size=16, weight="bold")
+                        font=dict(
+                            color="#4CAF50", 
+                            size=22, 
+                            family="Arial", 
+                            weight="bold"
+                        ),
+                        bgcolor="rgba(255, 255, 255, 0.8)",
+                        bordercolor="#4CAF50",
+                        borderwidth=2,
+                        borderpad=3,
+                        xshift=20
                     ),
                     dict(
                         x=dates[-1],
@@ -605,7 +646,17 @@ class CIIAgent:
                         text="B",
                         showarrow=False,
                         align="right",
-                        font=dict(color="#8BC34A", size=16, weight="bold")
+                        font=dict(
+                            color="#8BC34A", 
+                            size=22, 
+                            family="Arial", 
+                            weight="bold"
+                        ),
+                        bgcolor="rgba(255, 255, 255, 0.8)",
+                        bordercolor="#8BC34A",
+                        borderwidth=2,
+                        borderpad=3,
+                        xshift=20
                     ),
                     dict(
                         x=dates[-1],
@@ -615,7 +666,17 @@ class CIIAgent:
                         text="C",
                         showarrow=False,
                         align="right",
-                        font=dict(color="#FFC107", size=16, weight="bold")
+                        font=dict(
+                            color="#FFC107", 
+                            size=22, 
+                            family="Arial", 
+                            weight="bold"
+                        ),
+                        bgcolor="rgba(255, 255, 255, 0.8)",
+                        bordercolor="#FFC107",
+                        borderwidth=2,
+                        borderpad=3,
+                        xshift=20
                     ),
                     dict(
                         x=dates[-1],
@@ -625,7 +686,17 @@ class CIIAgent:
                         text="D",
                         showarrow=False,
                         align="right",
-                        font=dict(color="#FF9800", size=16, weight="bold")
+                        font=dict(
+                            color="#FF9800", 
+                            size=22, 
+                            family="Arial", 
+                            weight="bold"
+                        ),
+                        bgcolor="rgba(255, 255, 255, 0.8)",
+                        bordercolor="#FF9800",
+                        borderwidth=2,
+                        borderpad=3,
+                        xshift=20
                     ),
                     dict(
                         x=dates[-1],
@@ -635,40 +706,135 @@ class CIIAgent:
                         text="E",
                         showarrow=False,
                         align="right",
-                        font=dict(color="#F44336", size=16, weight="bold")
+                        font=dict(
+                            color="#F44336", 
+                            size=22, 
+                            family="Arial", 
+                            weight="bold"
+                        ),
+                        bgcolor="rgba(255, 255, 255, 0.8)",
+                        bordercolor="#F44336",
+                        borderwidth=2,
+                        borderpad=3,
+                        xshift=20
                     )
                 ]
+                
+                # Add current rating annotation
+                # Determine latest rating
+                latest_metric = metrics[-1]
+                latest_rating = latest_metric['cii_rating']
+                latest_aer = latest_metric['attained_aer']
+                
+                rating_color = {
+                    'A': "#4CAF50",
+                    'B': "#8BC34A",
+                    'C': "#FFC107",
+                    'D': "#FF9800",
+                    'E': "#F44336"
+                }.get(latest_rating, "#757575")
+                
+                # Add a prominent latest rating annotation
+                annotations.append(dict(
+                    x=dates[-1],
+                    y=latest_aer,
+                    xref="x",
+                    yref="y",
+                    text=f"Current Rating: {latest_rating}",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowcolor=rating_color,
+                    arrowsize=1.5,
+                    arrowwidth=2,
+                    ax=-80,
+                    ay=-40,
+                    font=dict(
+                        color=rating_color, 
+                        size=16, 
+                        family="Arial", 
+                        weight="bold"
+                    ),
+                    bgcolor="rgba(255, 255, 255, 0.95)",
+                    bordercolor=rating_color,
+                    borderwidth=2,
+                    borderpad=4
+                ))
             
-            # Update layout
+            # Update layout with professional appearance
             fig.update_layout(
-                title="Carbon Intensity Indicator (CII) Trend (YTD)",
-                xaxis_title="Date",
-                yaxis_title="AER (gCO₂/dwt-nm)",
-                template="plotly_dark",
-                height=500,
+                title={
+                    'text': "Carbon Intensity Indicator (CII) Trend",
+                    'y':0.95,
+                    'x':0.5,
+                    'xanchor': 'center',
+                    'yanchor': 'top',
+                    'font': dict(
+                        size=24, 
+                        family="Arial", 
+                        color="#333333"
+                    )
+                },
+                xaxis_title={
+                    'text': "Date",
+                    'font': dict(size=18, family="Arial", color="#333333")
+                },
+                yaxis_title={
+                    'text': "AER (gCO₂/dwt-nm)",
+                    'font': dict(size=18, family="Arial", color="#333333")
+                },
+                paper_bgcolor='rgb(255, 255, 255)',
+                plot_bgcolor='rgb(245, 245, 245)',
+                height=650,  # Taller for better detail
+                margin=dict(l=50, r=80, t=80, b=50),  # Extra right margin for rating labels
                 yaxis=dict(
-                    range=[y_min, y_max]
+                    range=[y_min, y_max],
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(211, 211, 211, 0.5)'
+                ),
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='rgba(211, 211, 211, 0.5)',
+                    tickformat="%d %b %Y",
+                    tickangle=-45,
+                    tickfont=dict(family="Arial", size=12)
                 ),
                 legend=dict(
                     orientation="h",
                     yanchor="bottom",
                     y=1.02,
                     xanchor="center",
-                    x=0.5
+                    x=0.5,
+                    bgcolor="rgba(255, 255, 255, 0.8)",
+                    bordercolor="rgba(0, 0, 0, 0.1)",
+                    borderwidth=1,
+                    font=dict(family="Arial", size=12)
                 ),
-                annotations=annotations
-            )
-            
-            # Format dates on x-axis
-            fig.update_xaxes(
-                tickformat="%d %b %Y",
-                tickangle=-45
+                annotations=annotations,
+                shapes=[
+                    # Add a subtle 3D effect border around the plot
+                    dict(
+                        type="rect",
+                        xref="paper",
+                        yref="paper",
+                        x0=0,
+                        y0=0,
+                        x1=1,
+                        y1=1,
+                        line=dict(
+                            color="rgba(0,0,0,0.1)",
+                            width=1,
+                        ),
+                        layer="below"
+                    )
+                ]
             )
             
             return fig
-            
+                
         except Exception as e:
-            st.error(f"Error creating CII trend chart: {str(e)}")
+            print(f"Error creating CII trend chart: {str(e)}")
             traceback.print_exc()
             return None
     
