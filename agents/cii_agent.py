@@ -225,7 +225,13 @@ class CIIAgent:
         reference_cii = self._calculate_reference_cii(capacity, imo_ship_type)
         
         # Calculate required CII for the current year
-        current_year = sorted_data[0]['report_date'].year if sorted_data else date.today().year
+        # Fix: Parse the date string from the first record
+        if sorted_data:
+            first_date = self._parse_date(sorted_data[0]['report_date'])
+            current_year = first_date.year
+        else:
+            current_year = date.today().year
+            
         required_cii = self._calculate_required_cii(reference_cii, current_year)
         
         cumulative_distance = 0
@@ -304,17 +310,26 @@ class CIIAgent:
         """
         Calculate reference CII based on capacity and ship type
         """
+        # Use exactly the same parameters as in the provided code
+        params = {
+            'bulk_carrier': [{'capacity_threshold': 279000, 'a': 4745, 'c': 0.622}],
+            'gas_carrier': [{'capacity_threshold': 65000, 'a': 144050000000, 'c': 2.071}],
+            'tanker': [{'capacity_threshold': float('inf'), 'a': 5247, 'c': 0.61}],
+            'container_ship': [{'capacity_threshold': float('inf'), 'a': 1984, 'c': 0.489}],
+            'general_cargo_ship': [{'capacity_threshold': float('inf'), 'a': 31948, 'c': 0.792}],
+            'refrigerated_cargo_carrier': [{'capacity_threshold': float('inf'), 'a': 4600, 'c': 0.557}],
+            'lng_carrier': [{'capacity_threshold': 100000, 'a': 144790000000000, 'c': 2.673}],
+        }
+        
         if capacity <= 0:
             st.warning(f"Invalid capacity: {capacity}. Using default value.")
             capacity = 10000  # Default fallback value
-            
-        # Use the reference parameters for the ship type
-        ship_params = self.cii_reference_params.get(ship_type.lower())
-        if not ship_params:
-            # Use bulk carrier as default if ship type is not found
-            ship_params = self.cii_reference_params.get('bulk_carrier')
         
-        # Use the first set of parameters (simplification)
+        ship_params = params.get(ship_type.lower())
+        if not ship_params:
+            st.warning(f"Unknown ship type: {ship_type}. Using bulk carrier as default.")
+            ship_params = params.get('bulk_carrier')
+        
         a, c = ship_params[0]['a'], ship_params[0]['c']
         return a * (capacity ** -c)
     
@@ -322,9 +337,9 @@ class CIIAgent:
         """
         Calculate required CII based on reference CII and year
         """
-        # Use the reduction factor for the year or default to 1.0
-        reduction_factor = self.reduction_factors.get(year, 1.0)
-        return reference_cii * reduction_factor
+        # Use exactly the same reduction factors as in the provided code
+        reduction_factors = {2023: 0.95, 2024: 0.93, 2025: 0.91, 2026: 0.89}
+        return reference_cii * reduction_factors.get(year, 1.0)
     
     def _calculate_cii_rating(self, attained_cii, required_cii):
         """
