@@ -488,8 +488,14 @@ class AdvancedReportGenerator:
     def _generate_formatted_report(self, vessel_name, report_date, analyst_name, hull_metrics, speed_metrics, options, vessel_data):
         try:
             # Open the template document
-            template_path = "templates/vessel_performance_template.docx"
-            doc = Document(template_path)
+            try:
+                template_path = "templates/vessel_performance_template.docx"
+                print(f"Attempting to load template from: {template_path}")
+                doc = Document(template_path)
+                print("Template loaded successfully")
+            except Exception as e:
+                print(f"Error loading template: {str(e)}")
+                # Fallback to creating a simple document
             
             # Replace text placeholders throughout the document
             self._replace_text_in_document(doc, {
