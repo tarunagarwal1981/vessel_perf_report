@@ -330,25 +330,6 @@ class AdvancedReportGenerator:
                     "Excess Power (%)"
                 )
                 
-                # Optimize chart for full-width display
-                if chart is not None:
-                    # Adjust layout for better full-width display
-                    chart.update_layout(
-                        height=450,  # Slightly shorter height for better aspect ratio
-                        margin=dict(l=50, r=50, t=60, b=50),  # More balanced margins
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="center",
-                            x=0.5  # Center the legend
-                        ),
-                        # Increase font sizes for better readability
-                        title=dict(font=dict(size=20)),
-                        xaxis=dict(title=dict(font=dict(size=16))),
-                        yaxis=dict(title=dict(font=dict(size=16)))
-                    )
-                
                 return chart, latest_value
             
             return None, None
@@ -380,28 +361,12 @@ class AdvancedReportGenerator:
                     "Speed vs. Consumption - Ballast Condition"
                 )
                 
-                # Optimize ballast chart for side-by-side display
-                if ballast_chart:
-                    ballast_chart.update_layout(
-                        height=400,  # Reduced height for side-by-side
-                        margin=dict(l=40, r=40, t=50, b=50),
-                        font=dict(size=12)  # Smaller font for side-by-side
-                    )
-                
                 # Generate laden chart using speed_agent's method
                 laden_chart = speed_agent.create_speed_consumption_chart(
                     filtered_data_consumption,
                     "laden",
                     "Speed vs. Consumption - Laden Condition"
                 )
-                
-                # Optimize laden chart for side-by-side display
-                if laden_chart:
-                    laden_chart.update_layout(
-                        height=400,  # Reduced height for side-by-side
-                        margin=dict(l=40, r=40, t=50, b=50),
-                        font=dict(size=12)  # Smaller font for side-by-side
-                    )
             
             return ballast_chart, laden_chart
         except Exception as e:
