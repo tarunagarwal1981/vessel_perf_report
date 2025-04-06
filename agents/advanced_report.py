@@ -108,15 +108,6 @@ class AdvancedReportGenerator:
                     index=1
                 )
                 
-                # Debug - Upload template option
-                st.subheader("Template Upload (Optional)")
-                uploaded_template = st.file_uploader("Upload report template", type="docx")
-                if uploaded_template is not None:
-                    # Save the uploaded template
-                    with open("uploaded_template.docx", "wb") as f:
-                        f.write(uploaded_template.getbuffer())
-                    st.success("Template uploaded successfully")
-                
                 # Generate report button
                 if st.button("Generate Report"):
                     try:
@@ -147,8 +138,7 @@ class AdvancedReportGenerator:
                                     'include_machinery': include_machinery,
                                     'template_option': template_option
                                 },
-                                vessel_data=vessel_data,
-                                uploaded_template=uploaded_template is not None
+                                vessel_data=vessel_data
                             )
                             
                             # Create download button
@@ -495,7 +485,7 @@ class AdvancedReportGenerator:
             print(f"Error saving chart image: {str(e)}")
             return None
     
-    # New method for replacing text in document
+    # Method for replacing text in document
     def _replace_text_in_document(self, doc, replacements):
         # Replace in paragraphs
         for paragraph in doc.paragraphs:
@@ -512,7 +502,7 @@ class AdvancedReportGenerator:
                             if key in paragraph.text:
                                 paragraph.text = paragraph.text.replace(key, value)
     
-    # New method for replacing charts in document
+    # Method for replacing charts in document
     def _replace_chart_in_document(self, doc, placeholder, chart):
         # Save chart as image
         chart_path = self._save_chart_as_image(chart)
@@ -565,7 +555,7 @@ class AdvancedReportGenerator:
             print(f"Error replacing chart: {str(e)}")
             return False
     
-    def _generate_formatted_report(self, vessel_name, report_date, analyst_name, hull_metrics, speed_metrics, options, vessel_data, uploaded_template=False):
+    def _generate_formatted_report(self, vessel_name, report_date, analyst_name, hull_metrics, speed_metrics, options, vessel_data):
         try:
             # Add debug expander
             debug_expander = st.expander("Report Generation Debug")
@@ -574,11 +564,8 @@ class AdvancedReportGenerator:
                 st.write(f"Vessel name: {vessel_name}")
                 st.write(f"Report date: {report_date}")
             
-            # Determine template path
-            if uploaded_template:
-                template_path = "uploaded_template.docx"
-            else:
-                template_path = "templates/vessel_performance_template.docx"
+            # Set template path
+            template_path = "templates/vessel_performance_template.docx"
             
             with debug_expander:
                 st.write(f"Template path: {template_path}")
