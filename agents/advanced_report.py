@@ -22,7 +22,7 @@ class AdvancedReportGenerator:
             'emissions_icon': 'icons/emissions_icon.png'
         }
     
-    def run(self, vessel_data, selected_vessel, hull_agent, speed_agent):
+    def run(self, vessel_data, selected_vessel, hull_agent, speed_agent, cii_agent=None):
         st.header("Performance Report Generator")
         
         # Troubleshooting data
@@ -40,6 +40,11 @@ class AdvancedReportGenerator:
                 hull_metrics = self._get_hull_metrics_from_agent(vessel_data, hull_agent)
                 speed_metrics = self._get_speed_metrics_from_agent(vessel_data, speed_agent)
                 
+                # Get CII metrics if CII agent is provided
+                cii_metrics = None
+                if cii_agent:
+                    cii_metrics, _ = cii_agent.get_cii_data_for_report(vessel_data, selected_vessel)
+                
                 # Create preview layout similar to the document
                 col1, col2, col3 = st.columns(3)
                 
@@ -56,8 +61,13 @@ class AdvancedReportGenerator:
                 
                 with col3:
                     st.markdown("### Emissions")
-                    st.markdown("**CII Rating:** A (Placeholder)")
-                    st.markdown("**AER:** 2.9 (Placeholder)")
+                    if cii_metrics:
+                        rating_color = self._get_cii_rating_color(cii_metrics['rating'])
+                        st.markdown(f"**CII Rating:** <span style='color:{rating_color};font-weight:bold;'>{cii_metrics['rating']}</span>", unsafe_allow_html=True)
+                        st.markdown(f"**AER:** {cii_metrics['attained_aer']:.2f} gCO₂/dwt-nm")
+                    else:
+                        st.markdown("**CII Rating:** No data")
+                        st.markdown("**AER:** No data")
                 
                 # Display hull performance chart from hull agent
                 st.subheader("Hull & Propeller Performance Analysis")
@@ -85,6 +95,15 @@ class AdvancedReportGenerator:
                         st.plotly_chart(laden_chart, use_container_width=True, key=f"laden_preview_{str(uuid.uuid4())[:8]}")
                     else:
                         st.info("No laden data available")
+                
+                # Display CII chart if CII agent is provided
+                if cii_agent:
+                    st.subheader("Carbon Intensity Indicator (CII) Analysis")
+                    _, cii_chart = cii_agent.get_cii_data_for_report(vessel_data, selected_vessel)
+                    if cii_chart:
+                        st.plotly_chart(cii_chart, use_container_width=True, key=f"cii_preview_{str(uuid.uuid4())[:8]}")
+                    else:
+                        st.info("No CII data available")
             
             with report_tab2:
                 st.markdown("### Generate Report")
@@ -101,7 +120,7 @@ class AdvancedReportGenerator:
                     st.subheader("Report Sections")
                     include_hull = st.checkbox("Include Hull Performance", value=True)
                     include_speed = st.checkbox("Include Speed Consumption", value=True)
-                    include_emissions = st.checkbox("Include Emissions (Placeholder)", value=False)
+                    include_emissions = st.checkbox("Include Emissions", value=True if cii_agent else False)
                     include_machinery = st.checkbox("Include Machinery (Placeholder)", value=False)
                 
                 # Report template options
@@ -136,7 +155,8 @@ class AdvancedReportGenerator:
                                 },
                                 vessel_data=vessel_data,
                                 hull_agent=hull_agent,
-                                speed_agent=speed_agent
+                                speed_agent=speed_agent,
+                                cii_agent=cii_agent
                             )
                             
                             # Create download button
@@ -162,6 +182,7 @@ class AdvancedReportGenerator:
         has_speed = False
         has_consumption = False
         has_loading_condition = False
+        has_hull_roughness = False
         ballast_count = 0
         laden_count = 0
         
@@ -180,6 +201,9 @@ class AdvancedReportGenerator:
                     ballast_count += 1
                 elif entry['loading_condition'].lower() == 'laden':
                     laden_count += 1
+            
+            if 'hull_roughness_power_loss' in entry and entry['hull_roughness_power_loss'] is not None:
+                has_hull_roughness = True
         
         with st.expander("Data Troubleshooting"):
             st.markdown(f"""
@@ -188,6 +212,7 @@ class AdvancedReportGenerator:
             - Has speed data: {has_speed}
             - Has consumption data: {has_consumption}
             - Has loading condition data: {has_loading_condition}
+            - Has hull roughness data: {has_hull_roughness}
             - Ballast entries: {ballast_count}
             - Laden entries: {laden_count}
             """)
@@ -384,6 +409,47 @@ class AdvancedReportGenerator:
             traceback.print_exc()
             return None, None
     
+    def _get_cii_rating_color(self, rating):
+        """Get color code for CII rating"""
+        rating_colors = {
+            'A': '#4CAF50',  # Green
+            'B': '#8BC34A',  # Light Green
+            'C': '#FFC107',  # Amber
+            'D': '#FF9800',  # Orange
+            'E': '#F44336'   # Red
+        }
+        return rating_colors.get(rating, '#757575')  # Default to gray
+    
+    def _calculate_emissions_improvement(self, cii_data):
+        """Calculate emissions improvement text for report"""
+        if not cii_data:
+            return "-"
+            
+        attained = cii_data['attained_aer']
+        required = cii_data['required_cii']
+        
+        if attained < required:
+            return f"The vessel's AER ({attained:.2f}) is below the required CII ({required:.2f}), demonstrating good performance."
+        else:
+            percent_improvement = ((attained - required) / attained) * 100
+            return f"A {percent_improvement:.1f}% improvement in emissions is needed to reach the required CII."
+    
+    def _calculate_hull_impact(self, hull_metrics, cii_data):
+        """Calculate hull impact on AER for report"""
+        if not cii_data or not hull_metrics:
+            return "-"
+        
+        power_loss = hull_metrics['power_loss']
+        if power_loss <= 15:
+            return "Hull condition is good and has minimal impact on emissions."
+        else:
+            # Estimate impact of hull condition on AER
+            # Assuming a linear relationship for simplicity
+            impact_percent = (power_loss - 15) * 0.5  # 0.5% impact per 1% excess power loss above 15%
+            impact_aer = (cii_data['attained_aer'] * impact_percent) / 100
+            
+            return f"Hull condition contributes approximately {impact_aer:.2f} gCO₂/dwt-nm ({impact_percent:.1f}%) to the current AER."
+    
     def _save_chart_as_image(self, fig):
         if fig is None:
             return None
@@ -531,7 +597,7 @@ class AdvancedReportGenerator:
             return False
     
     def _generate_formatted_report(self, vessel_name, report_date, analyst_name, hull_metrics, 
-                                 speed_metrics, options, vessel_data, hull_agent, speed_agent):
+                                 speed_metrics, options, vessel_data, hull_agent, speed_agent, cii_agent=None):
         try:
             # Add debug expander
             debug_expander = st.expander("Report Generation Debug")
@@ -539,6 +605,7 @@ class AdvancedReportGenerator:
                 st.write("Starting report generation...")
                 st.write(f"Vessel name: {vessel_name}")
                 st.write(f"Report date: {report_date}")
+                st.write(f"CII agent provided: {cii_agent is not None}")
             
             # Set template path
             template_path = "templates/vessel_performance_template.docx"
@@ -589,6 +656,17 @@ class AdvancedReportGenerator:
                 with debug_expander:
                     st.write("Replacing text placeholders...")
                 
+                # Get CII metrics if agent is provided
+                cii_data = None
+                if cii_agent:
+                    with debug_expander:
+                        st.write("Fetching CII data for report...")
+                    cii_metrics, _ = cii_agent.get_cii_data_for_report(vessel_data, vessel_name)
+                    if cii_metrics:
+                        cii_data = cii_metrics
+                        with debug_expander:
+                            st.write(f"✅ CII data retrieved: Rating = {cii_metrics['rating']}")
+                
                 replacements = {
                     '{{VESSEL_NAME}}': vessel_name.upper(),
                     '{{REPORT_DATE}}': report_date.strftime('%B %Y'),
@@ -601,10 +679,32 @@ class AdvancedReportGenerator:
                     '{{HULL_CLEANING_DATE}}': "-",
                     '{{BALLAST_AVG}}': f"{speed_metrics['ballast_avg']:.1f}",
                     '{{LADEN_AVG}}': f"{speed_metrics['laden_avg']:.1f}",
-                    '{{CII_RATING}}': "A",
-                    '{{CII_RATING_DETAIL}}': "A (AER: 2.9)",
-                    '{{EMISSIONS_IMPROVEMENT}}': "-",
-                    '{{HULL_IMPACT_ON_AER}}': "-",
+                }
+                
+                # Add CII data to replacements if available
+                if cii_data:
+                    replacements.update({
+                        '{{CII_RATING}}': cii_data['rating'],
+                        '{{CII_RATING_DETAIL}}': f"{cii_data['rating']} (AER: {cii_data['attained_aer']:.2f})",
+                        '{{AER_VALUE}}': f"{cii_data['attained_aer']:.2f}",
+                        '{{REQUIRED_CII}}': f"{cii_data['required_cii']:.2f}",
+                        '{{EMISSIONS_IMPROVEMENT}}': self._calculate_emissions_improvement(cii_data),
+                        '{{HULL_IMPACT_ON_AER}}': self._calculate_hull_impact(hull_metrics, cii_data)
+                    })
+                else:
+                    # Default values if CII data is not available
+                    replacements.update({
+                        '{{CII_RATING}}': "N/A",
+                        '{{CII_RATING_DETAIL}}': "N/A",
+                        '{{AER_VALUE}}': "N/A",
+                        '{{REQUIRED_CII}}': "N/A",
+                        '{{EMISSIONS_IMPROVEMENT}}': "-",
+                        '{{HULL_IMPACT_ON_AER}}': "-"
+                    })
+                
+                # Add remaining placeholders
+                # Add remaining placeholders
+                replacements.update({
                     '{{ME_SFOC}}': "167.12 g/KWhr at 81% Load (Placeholder)",
                     '{{ME_RECOMMENDATION}}': "ME Performance is within Acceptable Range",
                     '{{ME_FUEL_SAVING}}': "-",
@@ -612,7 +712,7 @@ class AdvancedReportGenerator:
                     '{{REDUNDANT_AE_HOURS}}': "-",
                     '{{HULL_NOTES}}': "The vessel tends to operate with a gradual change in added resistance over time.",
                     '{{SPEED_CONSUMPTION_NOTES}}': "In laden and ballast conditions, consumption remains relatively consistent."
-                }
+                })
                 
                 self._replace_text_in_document(doc, replacements)
                 with debug_expander:
@@ -620,6 +720,7 @@ class AdvancedReportGenerator:
             except Exception as e:
                 with debug_expander:
                     st.error(f"Error replacing text: {str(e)}")
+                    st.code(traceback.format_exc())
             
             # Try to replace charts
             try:
@@ -671,6 +772,26 @@ class AdvancedReportGenerator:
                 else:
                     with debug_expander:
                         st.warning("⚠️ No laden chart data available")
+                
+                # Replace CII chart if CII agent is available
+                if cii_agent and options.get('include_emissions', False):
+                    with debug_expander:
+                        st.write("Generating CII chart for report...")
+                        
+                    _, cii_chart = cii_agent.get_cii_data_for_report(vessel_data, vessel_name)
+                    
+                    if cii_chart:
+                        # Use 7.5 inches for full page width
+                        success = self._replace_chart_in_document(doc, '{{CII_CHART}}', cii_chart, width_inches=7.5)
+                        with debug_expander:
+                            if success:
+                                st.write("✅ CII chart replaced (full width)")
+                            else:
+                                st.warning("⚠️ CII chart placeholder not found")
+                    else:
+                        with debug_expander:
+                            st.warning("⚠️ No CII chart data available")
+                
             except Exception as e:
                 with debug_expander:
                     st.error(f"Error replacing charts: {str(e)}")
@@ -714,6 +835,17 @@ class AdvancedReportGenerator:
             
             if speed_metrics['laden_avg'] > 0:
                 error_doc.add_paragraph(f"Laden Consumption: {speed_metrics['laden_avg']:.1f} MT/day")
+            
+            # Add CII information if available
+            if cii_agent:
+                try:
+                    cii_metrics, _ = cii_agent.get_cii_data_for_report(vessel_data, vessel_name)
+                    if cii_metrics:
+                        error_doc.add_paragraph(f"CII Rating: {cii_metrics['rating']}")
+                        error_doc.add_paragraph(f"Attained AER: {cii_metrics['attained_aer']:.2f} gCO₂/dwt-nm")
+                        error_doc.add_paragraph(f"Required CII: {cii_metrics['required_cii']:.2f} gCO₂/dwt-nm")
+                except Exception as cii_error:
+                    error_doc.add_paragraph(f"Error getting CII data: {str(cii_error)}")
             
             # Save the error document
             error_file = BytesIO()
