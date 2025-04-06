@@ -154,6 +154,10 @@ class AdvancedReportGenerator:
                     except Exception as e:
                         st.error(f"Error generating report: {str(e)}")
                         st.code(traceback.format_exc())
+        except Exception as e:
+            st.error(f"Error in report generation UI: {str(e)}")
+            st.code(traceback.format_exc())
+    
     def _get_hull_metrics(self, vessel_data, hull_agent):
         try:
             # Filter data for power loss
@@ -189,13 +193,10 @@ class AdvancedReportGenerator:
                 return "Unknown", 0, 0, "Insufficient data to provide recommendation."
     
         except Exception as e:
-            # Print error for debugging
+            # Log the error
             print(f"Error extracting hull metrics: {str(e)}")
-            # Return default/error values
-            return "Error", 0, 0, str(e)
-        
-            
-                
+            return "Error", 0, 0, f"Error analyzing hull performance: {str(e)}"
+    
     def _get_speed_metrics(self, vessel_data):
         try:
             # Filter data for speed-consumption
@@ -725,6 +726,7 @@ class AdvancedReportGenerator:
                 
                 doc.add_paragraph()
             
+            # Appendix
             # Appendix
             doc.add_heading('Appendix', 1)
             doc.add_heading('General Conditions', 2)
