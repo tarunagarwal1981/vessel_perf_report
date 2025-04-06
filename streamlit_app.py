@@ -4,7 +4,6 @@ import pandas as pd
 import traceback
 import os
 
-
 # For debug logging
 os.environ['STREAMLIT_LOG_LEVEL'] = 'debug'
 
@@ -73,7 +72,7 @@ if st.session_state.analysis_completed:
         st.session_state.selected_vessel = ""
         st.session_state.analysis_completed = False
         st.session_state.error_message = None
-        # Force a page refresh (using st.rerun instead of experimental_rerun)
+        # Force a page refresh
         st.rerun()
 
 # Check if dates are valid
@@ -118,7 +117,7 @@ else:
                     st.session_state.analysis_completed = True
                     st.session_state.error_message = None
                     
-                    # Use st.rerun() to refresh the page instead of experimental_rerun
+                    # Use st.rerun() to refresh the page
                     st.rerun()
                 else:
                     st.session_state.error_message = f"No performance data available for {selected_vessel} in the selected date range."
