@@ -1,7 +1,8 @@
 streamlit
 pandas
 numpy 
-matplotlib 
+matplotlib>=3.5.0
+seaborn>=0.11.2
 plotly 
 boto3 
 pymysql
