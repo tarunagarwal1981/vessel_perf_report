@@ -470,8 +470,12 @@ class CIIAgent:
             capped_attained_aer = [min(aer, r * 3) for aer, r in zip(attained_aer, required_cii)]
             y_max = max([max(capped_attained_aer), max(required_cii) * 1.5])
             
+            # Create a list of y_max values with the same length as dates
+            y_max_values = [y_max] * len(dates)
+            
             # Calculate a reasonable minimum y-axis value
             y_min = max(0, min(a_boundary) * 0.8)
+            y_min_values = [y_min] * len(dates)
             
             # Create figure
             fig = go.Figure()
@@ -480,7 +484,7 @@ class CIIAgent:
             # A zone (green)
             fig.add_trace(go.Scatter(
                 x=dates + dates[::-1],
-                y=[0] * len(dates) + a_boundary[::-1],
+                y=y_min_values + a_boundary[::-1],
                 fill='toself',
                 fillcolor='rgba(76, 175, 80, 0.2)',
                 line=dict(width=0),
@@ -524,7 +528,7 @@ class CIIAgent:
             # E zone (red)
             fig.add_trace(go.Scatter(
                 x=dates + dates[::-1],
-                y=d_boundary + [y_max] * len(dates)[::-1],
+                y=d_boundary + y_max_values[::-1],  # Fixed: Using the pre-created list
                 fill='toself',
                 fillcolor='rgba(244, 67, 54, 0.2)',
                 line=dict(width=0),
@@ -578,6 +582,64 @@ class CIIAgent:
             ))
             
             # Add annotations for the rating zones
+            annotations = []
+            
+            # Only add annotations if we have data
+            if dates:
+                annotations = [
+                    dict(
+                        x=dates[-1],
+                        y=max(y_min + 0.05 * (y_max - y_min), a_boundary[-1] * 0.5),
+                        xref="x",
+                        yref="y",
+                        text="A",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#4CAF50", size=16, weight="bold")
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=(a_boundary[-1] + required_cii[-1]) / 2,
+                        xref="x",
+                        yref="y",
+                        text="B",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#8BC34A", size=16, weight="bold")
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=(required_cii[-1] + c_boundary[-1]) / 2,
+                        xref="x",
+                        yref="y",
+                        text="C",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#FFC107", size=16, weight="bold")
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=(c_boundary[-1] + d_boundary[-1]) / 2,
+                        xref="x",
+                        yref="y",
+                        text="D",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#FF9800", size=16, weight="bold")
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=min(y_max - 0.05 * (y_max - y_min), d_boundary[-1] * 1.5),
+                        xref="x",
+                        yref="y",
+                        text="E",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#F44336", size=16, weight="bold")
+                    )
+                ]
+            
+            # Update layout
             fig.update_layout(
                 title="Carbon Intensity Indicator (CII) Trend (YTD)",
                 xaxis_title="Date",
@@ -594,58 +656,7 @@ class CIIAgent:
                     xanchor="center",
                     x=0.5
                 ),
-                annotations=[
-                    dict(
-                        x=dates[-1] if dates else None,
-                        y=max(y_min + 0.05 * (y_max - y_min), a_boundary[-1] * 0.5) if dates else None,
-                        xref="x",
-                        yref="y",
-                        text="A",
-                        showarrow=False,
-                        align="right",
-                        font=dict(color="#4CAF50", size=16, weight="bold")
-                    ),
-                    dict(
-                        x=dates[-1] if dates else None,
-                        y=(a_boundary[-1] + required_cii[-1]) / 2 if dates else None,
-                        xref="x",
-                        yref="y",
-                        text="B",
-                        showarrow=False,
-                        align="right",
-                        font=dict(color="#8BC34A", size=16, weight="bold")
-                    ),
-                    dict(
-                        x=dates[-1] if dates else None,
-                        y=(required_cii[-1] + c_boundary[-1]) / 2 if dates else None,
-                        xref="x",
-                        yref="y",
-                        text="C",
-                        showarrow=False,
-                        align="right",
-                        font=dict(color="#FFC107", size=16, weight="bold")
-                    ),
-                    dict(
-                        x=dates[-1] if dates else None,
-                        y=(c_boundary[-1] + d_boundary[-1]) / 2 if dates else None,
-                        xref="x",
-                        yref="y",
-                        text="D",
-                        showarrow=False,
-                        align="right",
-                        font=dict(color="#FF9800", size=16, weight="bold")
-                    ),
-                    dict(
-                        x=dates[-1] if dates else None,
-                        y=min(y_max - 0.05 * (y_max - y_min), d_boundary[-1] * 1.5) if dates else None,
-                        xref="x",
-                        yref="y",
-                        text="E",
-                        showarrow=False,
-                        align="right",
-                        font=dict(color="#F44336", size=16, weight="bold")
-                    ),
-                ]
+                annotations=annotations
             )
             
             # Format dates on x-axis
