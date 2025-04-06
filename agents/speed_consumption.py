@@ -95,79 +95,198 @@ class SpeedConsumptionAgent:
         consumptions = [row.get('normalised_consumption', 0) for row in condition_data]
         dates = [pd.to_datetime(row.get('report_date')) for row in condition_data]
         
-        # Create a color gradient based on dates
-        # Convert dates to numeric values for the colorscale
-        date_nums = [(d - min(dates)).total_seconds() / 86400 for d in dates]  # Days since earliest date
-        
-        # Create the figure
+        # Create the figure with enhanced design
         fig = go.Figure()
         
-        # Add scatter plot with neon color gradient (markers only, no lines)
+        # Add a decorative background grid to suggest a 3D plane
+        speeds_range = max(speeds) - min(speeds)
+        consumption_range = max(consumptions) - min(consumptions)
+        
+        # Create the scatter plot with enhanced visualization
         fig.add_trace(go.Scatter(
             x=speeds,
             y=consumptions,
-            mode='markers',  # Only markers, no lines
+            mode='markers',
             marker=dict(
-                size=10,
-                color=date_nums,
-                colorscale='Plasma',  # Neon-like colorscale
+                size=14,
+                color=speeds,  # Color by speed value
+                colorscale='Viridis',
                 showscale=True,
                 colorbar=dict(
-                    title="Days Since First Data Point"
-                )
+                    title="Speed (knots)",
+                    titleside="right",
+                    titlefont=dict(size=12, family="Arial")
+                ),
+                line=dict(width=2, color='rgba(255, 255, 255, 0.8)'),  # White border for 3D effect
+                symbol='circle',
             ),
-            name='Operational Data'
+            name='Speed-Consumption Data',
+            hoverlabel=dict(
+                bgcolor="white",
+                font_size=12,
+                font_family="Arial"
+            ),
         ))
         
-        # Calculate 2nd order polynomial fit if we have enough data points
+        # Calculate curve fit if enough data points
         if len(speeds) > 2:
-            # Fit a 2nd order polynomial
-            coeffs = np.polyfit(speeds, consumptions, 2)
-            poly = np.poly1d(coeffs)
+            # Sort values by speed for smooth curve
+            sorted_indices = np.argsort(speeds)
+            speeds_sorted = [speeds[i] for i in sorted_indices]
+            consumptions_sorted = [consumptions[i] for i in sorted_indices]
             
-            # Generate points for the curve
-            x_smooth = np.linspace(min(speeds), max(speeds), 100)
-            y_smooth = poly(x_smooth)
+            # Create ranges for plotting
+            speeds_smooth = np.linspace(min(speeds), max(speeds), 100)
             
-            # Add the polynomial curve
+            # Try cubic fit if enough points, otherwise polynomial
+            if len(speeds) >= 8:
+                from scipy.interpolate import CubicSpline
+                try:
+                    cs = CubicSpline(speeds_sorted, consumptions_sorted)
+                    consumptions_smooth = cs(speeds_smooth)
+                    line_type = 'spline'
+                except:
+                    # Fallback to polynomial
+                    coeffs = np.polyfit(speeds, consumptions, 3)
+                    poly = np.poly1d(coeffs)
+                    consumptions_smooth = poly(speeds_smooth)
+                    line_type = 'polynomial'
+            else:
+                # Use polynomial fit
+                coeffs = np.polyfit(speeds, consumptions, 2)
+                poly = np.poly1d(coeffs)
+                consumptions_smooth = poly(speeds_smooth)
+                line_type = 'polynomial'
+            
+            # Add the optimized curve with gradient
             fig.add_trace(go.Scatter(
-                x=x_smooth,
-                y=y_smooth,
+                x=speeds_smooth,
+                y=consumptions_smooth,
                 mode='lines',
-                line=dict(color='#48cae4', width=3),  # Blue line
-                name='Polynomial Fit (2nd Order)'
+                line=dict(
+                    color='rgba(65, 105, 225, 0.9)',
+                    width=3.5,
+                    shape='spline'
+                ),
+                name='Optimized Curve',
+                fill='tozeroy',
+                fillcolor='rgba(65, 105, 225, 0.1)'
             ))
             
-            # Add equation annotation
-            equation = f"y = {coeffs[0]:.4f}x² + {coeffs[1]:.4f}x + {coeffs[2]:.4f}"
-            fig.add_annotation(
-                x=0.05,
-                y=0.95,
-                xref="paper",
-                yref="paper",
-                text=equation,
-                showarrow=False,
-                bgcolor="rgba(0,0,0,0.5)",
-                bordercolor="#48cae4",
-                borderwidth=1,
-                borderpad=4,
-                font=dict(color="#48cae4")
-            )
+            # Add annotation with equation - more professional looking
+            if line_type == 'polynomial':
+                if len(coeffs) >= 3:
+                    equation = f"y = {coeffs[0]:.4f}x² + {coeffs[1]:.4f}x + {coeffs[2]:.4f}"
+                    fig.add_annotation(
+                        x=0.5,
+                        y=0.05,
+                        xref="paper",
+                        yref="paper",
+                        text=equation,
+                        showarrow=False,
+                        font=dict(family="Arial", size=12, color="#333333"),
+                        bgcolor="rgba(255, 255, 255, 0.9)",
+                        bordercolor="rgba(65, 105, 225, 0.9)",
+                        borderwidth=1,
+                        borderpad=4
+                    )
+            
+            # Find optimal speed (lowest consumption per distance)
+            # This would be the minimum of consumption/speed
+            efficiency = [c/s for c, s in zip(consumptions_smooth, speeds_smooth) if s > 0]
+            if efficiency:
+                optimal_index = np.argmin(efficiency)
+                optimal_speed = speeds_smooth[optimal_index]
+                optimal_consumption = consumptions_smooth[optimal_index]
+                
+                # Mark the optimal point
+                fig.add_trace(go.Scatter(
+                    x=[optimal_speed],
+                    y=[optimal_consumption],
+                    mode='markers',
+                    marker=dict(
+                        size=16,
+                        color='rgba(255, 90, 0, 1)',
+                        symbol='star',
+                        line=dict(width=2, color='white')
+                    ),
+                    name='Optimal Efficiency Point'
+                ))
+                
+                fig.add_annotation(
+                    x=optimal_speed,
+                    y=optimal_consumption,
+                    text=f"Optimal: {optimal_speed:.1f} knots",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowcolor="rgba(255, 90, 0, 1)",
+                    arrowsize=1,
+                    arrowwidth=2,
+                    ax=40,
+                    ay=-40,
+                    font=dict(family="Arial", size=12, color="rgba(255, 90, 0, 1)"),
+                    bgcolor="white",
+                    bordercolor="rgba(255, 90, 0, 1)",
+                    borderwidth=1,
+                    borderpad=4
+                )
         
-        # Update layout
+        # Update layout for a more professional look
         fig.update_layout(
-            title=chart_title,
-            xaxis_title="Speed (knots)",
-            yaxis_title="Fuel Consumption (mt/day)",
-            template="plotly_dark",
-            height=600,
+            title={
+                'text': chart_title,
+                'y':0.95,
+                'x':0.5,
+                'xanchor': 'center',
+                'yanchor': 'top',
+                'font': dict(size=18, family="Arial", color="#333333")
+            },
+            xaxis_title={
+                'text': "Speed (knots)",
+                'font': dict(size=14, family="Arial", color="#333333")
+            },
+            yaxis_title={
+                'text': "Fuel Consumption (mt/day)",
+                'font': dict(size=14, family="Arial", color="#333333")
+            },
+            paper_bgcolor='rgb(255, 255, 255)',
+            plot_bgcolor='rgb(245, 245, 245)',
+            height=500,
+            margin=dict(l=40, r=50, t=60, b=40),
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
                 y=1.02,
                 xanchor="right",
-                x=1
+                x=1,
+                font=dict(family="Arial", size=12, color="#333333"),
+                bgcolor="rgba(255, 255, 255, 0.7)",
+                bordercolor="#DDDDDD",
+                borderwidth=1
             )
+        )
+        
+        # Update axes styling for consistency
+        fig.update_xaxes(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(211, 211, 211, 0.5)',
+            zeroline=False,
+            showline=True,
+            linewidth=2,
+            linecolor='#333333',
+            tickfont=dict(family="Arial", size=12, color="#333333")
+        )
+        
+        fig.update_yaxes(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(211, 211, 211, 0.5)',
+            zeroline=False,
+            showline=True,
+            linewidth=2,
+            linecolor='#333333',
+            tickfont=dict(family="Arial", size=12, color="#333333")
         )
         
         return fig
