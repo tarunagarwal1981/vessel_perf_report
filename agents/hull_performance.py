@@ -116,80 +116,160 @@ class HullPerformanceAgent:
         if not data:
             return None, None
         
-        # Prepare data - ensure dates are in datetime format
+        # Prepare data
         dates = [pd.to_datetime(row['report_date']) for row in data]
         metric_values = [row.get(metric_name, 0) for row in data]
         
-        # Sort data by date for proper trend line
+        # Sort data for trend line
         sorted_indices = np.argsort(dates)
         dates_sorted = [dates[i] for i in sorted_indices]
         metric_values_sorted = [metric_values[i] for i in sorted_indices]
         
-        # Create a color gradient based on dates
-        # Convert dates to numeric values for the colorscale
-        date_nums = [(d - min(dates)).total_seconds() / 86400 for d in dates]  # Days since earliest date
-        
-        # Create the figure
+        # Create the figure with enhanced appearance
         fig = go.Figure()
         
-        # Add scatter plot with neon color gradient (markers only, no lines)
+        # Add 3D-like scatter plot with elevated appearance
         fig.add_trace(go.Scatter(
             x=dates,
             y=metric_values,
-            mode='markers',  # Only markers, no lines
+            mode='markers',
             marker=dict(
-                size=10,
-                color=date_nums,
-                colorscale='Plasma',  # Neon-like colorscale
+                size=12,
+                color=metric_values,  # Color by value instead of date for better meaning
+                colorscale='Turbo',   # More vibrant colorscale
                 showscale=True,
                 colorbar=dict(
-                    title="Days Since First Data Point"
-                )
+                    title="Power Loss (%)",
+                    titleside="right",
+                    titlefont=dict(size=14)
+                ),
+                line=dict(width=2, color='rgba(255, 255, 255, 0.8)'),  # Add white border for 3D effect
+                symbol='circle',
             ),
-            name='Performance Data'
+            name='Performance Data',
+            hoverlabel=dict(
+                bgcolor="white",
+                font_size=14,
+                font_family="Arial"
+            ),
         ))
         
-        # Calculate linear best fit if we have enough data points
+        # Calculate trend line
         latest_value = None
         if len(dates_sorted) > 1:
-            # Convert dates to numeric for fitting
             x_numeric = np.array([(d - dates_sorted[0]).total_seconds() / 86400 for d in dates_sorted])
             y = np.array(metric_values_sorted)
             
-            # Fit a line
-            coeffs = np.polyfit(x_numeric, y, 1)
-            slope = coeffs[0]
-            intercept = coeffs[1]
-            
-            # Generate points for the trend line
-            x_line = np.array([0, x_numeric[-1]])
-            y_line = slope * x_line + intercept
+            # Fit a polynomial instead of just linear for more interesting visual
+            if len(dates_sorted) >= 6:
+                # Higher order polynomial if we have enough points
+                coeffs = np.polyfit(x_numeric, y, 2)  # 2nd order polynomial
+                p = np.poly1d(coeffs)
+                
+                # Generate smooth curve
+                x_line = np.linspace(0, x_numeric[-1], 100)
+                y_line = p(x_line)
+            else:
+                # Linear if we don't have enough points
+                coeffs = np.polyfit(x_numeric, y, 1)
+                slope = coeffs[0]
+                intercept = coeffs[1]
+                x_line = np.array([0, x_numeric[-1]])
+                y_line = slope * x_line + intercept
             
             # Convert back to datetime for plotting
             x_line_dates = [dates_sorted[0] + datetime.timedelta(days=float(x)) for x in x_line]
             
-            # Add the best fit line
+            # Add gradient-filled trend area with dynamic transparency
             fig.add_trace(go.Scatter(
                 x=x_line_dates,
                 y=y_line,
                 mode='lines',
-                line=dict(color='#ff006e', width=3),  # Bright pink line
-                name='Trend Line'
+                line=dict(
+                    color='rgba(255, 0, 110, 0.9)',
+                    width=4,
+                    shape='spline',  # Smoother line
+                    dash='solid'
+                ),
+                name='Trend',
+                fill='tozeroy',
+                fillcolor='rgba(255, 0, 110, 0.2)'
             ))
             
             # Get the latest value from the trend line
-            latest_value = y_line[-1]
+            latest_value = y_line[-1] if len(y_line) > 0 else None
             
-            # For hull roughness power loss, add threshold lines
+            # Add thresholds with better visualization
             if metric_name == 'hull_roughness_power_loss':
-                # Add threshold lines for condition assessment
+                # Add semi-transparent areas for different zones
+                # Good zone (green, 0-15%)
+                fig.add_traces([
+                    go.Scatter(
+                        x=[min(dates), max(dates)], 
+                        y=[0, 0],
+                        mode='lines',
+                        line=dict(width=0),
+                        showlegend=False
+                    ),
+                    go.Scatter(
+                        x=[min(dates), max(dates)], 
+                        y=[15, 15],
+                        mode='lines',
+                        line=dict(width=0),
+                        fill='tonexty',
+                        fillcolor='rgba(68, 214, 44, 0.15)',
+                        name='Good Zone'
+                    )
+                ])
+                
+                # Average zone (yellow, 15-25%)
+                fig.add_traces([
+                    go.Scatter(
+                        x=[min(dates), max(dates)], 
+                        y=[15, 15],
+                        mode='lines',
+                        line=dict(width=0),
+                        showlegend=False
+                    ),
+                    go.Scatter(
+                        x=[min(dates), max(dates)], 
+                        y=[25, 25],
+                        mode='lines',
+                        line=dict(width=0),
+                        fill='tonexty',
+                        fillcolor='rgba(255, 214, 0, 0.15)',
+                        name='Average Zone'
+                    )
+                ])
+                
+                # Poor zone (red, >25%)
+                fig.add_traces([
+                    go.Scatter(
+                        x=[min(dates), max(dates)], 
+                        y=[25, 25],
+                        mode='lines',
+                        line=dict(width=0),
+                        showlegend=False
+                    ),
+                    go.Scatter(
+                        x=[min(dates), max(dates)], 
+                        y=[max(metric_values) * 1.2 if metric_values else 40, max(metric_values) * 1.2 if metric_values else 40],
+                        mode='lines',
+                        line=dict(width=0),
+                        fill='tonexty',
+                        fillcolor='rgba(255, 0, 0, 0.15)',
+                        name='Poor Zone'
+                    )
+                ])
+                
+                # Add threshold lines
                 fig.add_shape(
                     type="line",
                     x0=min(dates),
                     y0=15,
                     x1=max(dates),
                     y1=15,
-                    line=dict(color="yellow", width=2, dash="dash"),
+                    line=dict(color="rgba(255, 214, 0, 0.8)", width=2, dash="dot"),
                 )
                 
                 fig.add_shape(
@@ -198,59 +278,132 @@ class HullPerformanceAgent:
                     y0=25,
                     x1=max(dates),
                     y1=25,
-                    line=dict(color="red", width=2, dash="dash"),
+                    line=dict(color="rgba(255, 0, 0, 0.8)", width=2, dash="dot"),
                 )
                 
-                # Add annotations for the thresholds
+                # Add more professional annotations
                 fig.add_annotation(
-                    x=max(dates),
+                    x=min(dates),
                     y=15,
-                    text="15% - Average condition",
+                    text="Good/Average Threshold (15%)",
                     showarrow=False,
                     yshift=10,
-                    xshift=-100,
-                    font=dict(color="yellow")
+                    xshift=100,
+                    font=dict(color="rgba(255, 214, 0, 0.8)", size=14),
+                    bgcolor="rgba(255, 255, 255, 0.7)",
+                    bordercolor="rgba(255, 214, 0, 0.8)",
+                    borderwidth=1,
+                    borderpad=4,
+                    align="left"
                 )
                 
                 fig.add_annotation(
-                    x=max(dates),
+                    x=min(dates),
                     y=25,
-                    text="25% - Poor condition",
+                    text="Average/Poor Threshold (25%)",
                     showarrow=False,
                     yshift=10,
-                    xshift=-100,
-                    font=dict(color="red")
+                    xshift=100,
+                    font=dict(color="rgba(255, 0, 0, 0.8)", size=14),
+                    bgcolor="rgba(255, 255, 255, 0.7)",
+                    bordercolor="rgba(255, 0, 0, 0.8)",
+                    borderwidth=1,
+                    borderpad=4,
+                    align="left"
                 )
             
-            # Add annotation for the latest value
-            fig.add_annotation(
-                x=max(dates),
-                y=latest_value,
-                text=f"Latest: {latest_value:.2f}%",
-                showarrow=True,
-                arrowhead=1,
-                arrowcolor="#ff006e",
-                arrowsize=1,
-                arrowwidth=2,
-                ax=-40,
-                ay=-40,
-                font=dict(color="#ff006e", size=14)
-            )
+            # Add latest value annotation with more emphasis
+            if latest_value is not None:
+                # Determine color based on value
+                if metric_name == 'hull_roughness_power_loss':
+                    if latest_value < 15:
+                        color = "rgba(68, 214, 44, 1)"  # Green
+                    elif latest_value < 25:
+                        color = "rgba(255, 214, 0, 1)"  # Yellow
+                    else:
+                        color = "rgba(255, 0, 0, 1)"    # Red
+                else:
+                    color = "rgba(255, 0, 110, 1)"      # Pink
+                    
+                fig.add_annotation(
+                    x=max(dates),
+                    y=latest_value,
+                    text=f"Latest: {latest_value:.2f}%",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowcolor=color,
+                    arrowsize=1.5,
+                    arrowwidth=2.5,
+                    ax=-60,
+                    ay=-40,
+                    font=dict(color=color, size=16, family="Arial", weight="bold"),
+                    bgcolor="rgba(255, 255, 255, 0.9)",
+                    bordercolor=color,
+                    borderwidth=2,
+                    borderpad=4
+                )
         
-        # Update layout
+        # Update layout for a more professional appearance
         fig.update_layout(
-            title=chart_title,
-            xaxis_title="Date",
-            yaxis_title=y_axis_title,
-            template="plotly_dark",
-            height=600,
+            title={
+                'text': chart_title,
+                'y':0.95,
+                'x':0.5,
+                'xanchor': 'center',
+                'yanchor': 'top',
+                'font': dict(size=24, family="Arial", color="#333333")
+            },
+            xaxis_title={
+                'text': "Date",
+                'font': dict(size=18, family="Arial", color="#333333")
+            },
+            yaxis_title={
+                'text': y_axis_title,
+                'font': dict(size=18, family="Arial", color="#333333")
+            },
+            paper_bgcolor='rgb(255, 255, 255)',
+            plot_bgcolor='rgb(245, 245, 245)',
+            height=700,
+            margin=dict(l=50, r=50, t=80, b=50),
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
                 y=1.02,
-                xanchor="right",
-                x=1
+                xanchor="center",
+                x=0.5,
+                font=dict(
+                    family="Arial",
+                    size=14,
+                    color="#333333"
+                ),
+                bgcolor="rgba(255, 255, 255, 0.7)",
+                bordercolor="#666666",
+                borderwidth=1
             )
+        )
+        
+        # Update axes for better appearance
+        fig.update_xaxes(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(211, 211, 211, 0.5)',
+            zeroline=False,
+            showline=True,
+            linewidth=2,
+            linecolor='#333333',
+            tickfont=dict(family="Arial", size=12, color="#333333"),
+            tickangle=-30
+        )
+        
+        fig.update_yaxes(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(211, 211, 211, 0.5)',
+            zeroline=False,
+            showline=True,
+            linewidth=2,
+            linecolor='#333333',
+            tickfont=dict(family="Arial", size=12, color="#333333")
         )
         
         return fig, latest_value
