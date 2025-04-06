@@ -83,7 +83,7 @@ class SpeedConsumptionAgent:
     def create_speed_consumption_chart(self, data, condition, chart_title):
         """
         Create a publication-quality speed consumption chart with quadratic fit
-        using pure Matplotlib for maximum compatibility
+        using pure Matplotlib for maximum compatibility, with dynamic axes
         """
         if not data:
             return None
@@ -119,8 +119,17 @@ class SpeedConsumptionAgent:
             # Fit a 2nd order polynomial (quadratic)
             coeffs = np.polyfit(speeds, consumptions, 2)
             
-            # Generate points for smooth curve
-            x_smooth = np.linspace(min(speeds), max(speeds), 100)
+            # Calculate dynamic range for x-axis based on actual data
+            min_speed = min(speeds)
+            max_speed = max(speeds)
+            speed_range = max_speed - min_speed
+            
+            # Extend range slightly for better visualization
+            x_min = max(0, min_speed - 0.05 * speed_range)  # Don't go below 0
+            x_max = max_speed + 0.1 * speed_range
+            
+            # Generate points for smooth curve across the dynamic range
+            x_smooth = np.linspace(x_min, x_max, 100)
             y_smooth = coeffs[0] * x_smooth**2 + coeffs[1] * x_smooth + coeffs[2]
             
             # Add the fitted curve
@@ -166,9 +175,38 @@ class SpeedConsumptionAgent:
         # Add a simple grid
         plt.grid(True, linestyle='--', alpha=0.5)
         
-        # Set axis to start at 0
-        plt.xlim(left=0)
-        plt.ylim(bottom=0)
+        # Set dynamic x-axis limits
+        if speeds:
+            min_speed = min(speeds)
+            max_speed = max(speeds)
+            speed_range = max_speed - min_speed
+            
+            # Start at 0 or slightly below the minimum value, whichever is larger
+            # (prevents cutting off points that are close to 0)
+            x_min = max(0, min_speed - 0.05 * speed_range)
+            # Add 10% padding to the right
+            x_max = max_speed + 0.1 * speed_range
+            
+            plt.xlim(x_min, x_max)
+        else:
+            # Fallback if no data
+            plt.xlim(0, 20)
+        
+        # Set dynamic y-axis limits
+        if consumptions:
+            min_consumption = min(consumptions)
+            max_consumption = max(consumptions)
+            consumption_range = max_consumption - min_consumption
+            
+            # Start at 0 or slightly below the minimum value, whichever is larger
+            y_min = max(0, min_consumption - 0.05 * consumption_range) 
+            # Add 10% padding to the top
+            y_max = max_consumption + 0.1 * consumption_range
+            
+            plt.ylim(y_min, y_max)
+        else:
+            # Fallback if no data
+            plt.ylim(0, 100)
         
         # Add a legend
         plt.legend()
