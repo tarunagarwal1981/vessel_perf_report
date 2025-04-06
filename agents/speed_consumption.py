@@ -113,9 +113,10 @@ class SpeedConsumptionAgent:
                 colorscale='Viridis',
                 showscale=True,
                 colorbar=dict(
-                    title="Speed (knots)",
-                    titleside="right",
-                    titlefont=dict(size=12, family="Arial")
+                    title=dict(
+                        text="Speed (knots)",
+                        font=dict(size=12, family="Arial")
+                    )
                 ),
                 line=dict(width=2, color='rgba(255, 255, 255, 0.8)'),  # White border for 3D effect
                 symbol='circle',
@@ -140,8 +141,8 @@ class SpeedConsumptionAgent:
             
             # Try cubic fit if enough points, otherwise polynomial
             if len(speeds) >= 8:
-                from scipy.interpolate import CubicSpline
                 try:
+                    from scipy.interpolate import CubicSpline
                     cs = CubicSpline(speeds_sorted, consumptions_sorted)
                     consumptions_smooth = cs(speeds_smooth)
                     line_type = 'spline'
