@@ -265,22 +265,37 @@ class AdvancedReportGenerator:
     def _get_speed_consumption_charts_from_agent(self, vessel_data, speed_agent):
         """Get speed consumption charts from the speed agent"""
         try:
-            # Use speed_agent's method for creating charts
-            ballast_chart = speed_agent.create_speed_consumption_chart(
-                vessel_data,
-                "ballast",
-                "Speed vs. Consumption - Ballast Condition"
-            )
+            # Create ballast chart
+            ballast_chart = None
+            laden_chart = None
             
-            laden_chart = speed_agent.create_speed_consumption_chart(
-                vessel_data,
-                "laden",
-                "Speed vs. Consumption - Laden Condition"
-            )
+            # Check if we have valid data for charts
+            filtered_data_consumption = []
+            for entry in vessel_data:
+                if ('speed' in entry and entry['speed'] is not None and 
+                    'normalised_consumption' in entry and entry['normalised_consumption'] is not None and
+                    'loading_condition' in entry and entry['loading_condition'] is not None):
+                    filtered_data_consumption.append(entry)
             
+            if filtered_data_consumption:
+                # Generate ballast chart using speed_agent's method
+                ballast_chart = speed_agent.create_speed_consumption_chart(
+                    filtered_data_consumption,
+                    "ballast",
+                    "Speed vs. Consumption - Ballast Condition"
+                )
+                
+                # Generate laden chart using speed_agent's method
+                laden_chart = speed_agent.create_speed_consumption_chart(
+                    filtered_data_consumption,
+                    "laden",
+                    "Speed vs. Consumption - Laden Condition"
+                )
+                
             return ballast_chart, laden_chart
         except Exception as e:
             print(f"Error creating speed consumption charts: {str(e)}")
+            traceback.print_exc()  # Print full traceback for debugging
             return None, None
     
     def _save_chart_as_image(self, fig):
