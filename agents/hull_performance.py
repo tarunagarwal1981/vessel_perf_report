@@ -115,7 +115,7 @@ class HullPerformanceAgent:
     def create_performance_chart(self, data, metric_name, chart_title, y_axis_title):
         """
         Create a publication-quality hull performance chart with linear trend line
-        using Seaborn for enhanced aesthetics
+        using pure Matplotlib for maximum compatibility
         """
         if not data:
             return None, None
@@ -124,91 +124,65 @@ class HullPerformanceAgent:
         import matplotlib.dates as mdates
         import pandas as pd
         import numpy as np
-        import seaborn as sns
+        import io
+        import base64
         
         # Prepare data
-        df = pd.DataFrame({
-            'date': [pd.to_datetime(row['report_date']) for row in data],
-            'value': [row.get(metric_name, 0) for row in data]
-        })
+        dates = [pd.to_datetime(row['report_date']) for row in data]
+        metric_values = [row.get(metric_name, 0) for row in data]
         
-        # Sort by date
-        df = df.sort_values('date')
+        # Sort data for proper trend line
+        sorted_indices = np.argsort(dates)
+        dates_sorted = [dates[i] for i in sorted_indices]
+        metric_values_sorted = [metric_values[i] for i in sorted_indices]
         
-        # Set a professional seaborn style
-        sns.set_theme(style="whitegrid", context="paper")
-        
-        # Create figure with the right size
-        fig, ax = plt.subplots(figsize=(12, 7))
+        # Create a plain figure with simple styling
+        plt.figure(figsize=(10, 6))
         
         # Add colored background zones for hull roughness power loss
         if metric_name == 'hull_roughness_power_loss':
-            y_max = max(df['value'].max() * 1.2, 40)
+            y_max = max(max(metric_values) * 1.2, 40)
             
             # Good zone (0-15%)
-            ax.axhspan(0, 15, color=sns.color_palette("Greens", n_colors=9)[3], alpha=0.2, label='Good Condition')
+            plt.axhspan(0, 15, color='lightgreen', alpha=0.3, label='Good Condition')
             
             # Average zone (15-25%)
-            ax.axhspan(15, 25, color=sns.color_palette("Oranges", n_colors=9)[3], alpha=0.2, label='Average Condition')
+            plt.axhspan(15, 25, color='lightyellow', alpha=0.3, label='Average Condition')
             
             # Poor zone (>25%)
-            ax.axhspan(25, y_max, color=sns.color_palette("Reds", n_colors=9)[3], alpha=0.2, label='Poor Condition')
+            plt.axhspan(25, y_max, color='lightcoral', alpha=0.3, label='Poor Condition')
             
             # Add threshold lines
-            ax.axhline(y=15, color=sns.color_palette("Oranges", n_colors=9)[5], linestyle='--', 
-                      linewidth=1.5, label='Good/Average Threshold (15%)')
-            ax.axhline(y=25, color=sns.color_palette("Reds", n_colors=9)[5], linestyle='--', 
-                      linewidth=1.5, label='Average/Poor Threshold (25%)')
+            plt.axhline(y=15, color='orange', linestyle='--', alpha=0.7, linewidth=1.5, 
+                       label='Good/Average Threshold (15%)')
+            plt.axhline(y=25, color='red', linestyle='--', alpha=0.7, linewidth=1.5, 
+                       label='Average/Poor Threshold (25%)')
         
-        # Create scatter plot with enhanced aesthetics
-        scatter = sns.scatterplot(
-            data=df,
-            x='date',
-            y='value',
-            hue='value',  # Color points by value
-            palette='viridis',  # Professional color palette
-            size='value',  # Vary size by value
-            sizes=(50, 200),  # Min and max sizes
-            alpha=0.7,
-            legend=False,
-            ax=ax
-        )
-        
-        # Add a color bar for the values
-        from matplotlib.cm import ScalarMappable
-        from matplotlib.colors import Normalize
-        
-        norm = Normalize(vmin=df['value'].min(), vmax=df['value'].max())
-        sm = ScalarMappable(cmap='viridis', norm=norm)
-        sm.set_array([])
-        
-        cbar = plt.colorbar(sm, ax=ax)
-        cbar.set_label('Excess Power (%)', rotation=270, labelpad=20)
+        # Create scatter plot with plain colored points
+        plt.scatter(dates, metric_values, s=60, c='blue', alpha=0.7, label='Performance Data')
         
         # Calculate linear trend
         latest_value = None
-        if len(df) > 1:
-            # Add regression line with confidence interval
-            sns.regplot(
-                x=mdates.date2num(df['date']),
-                y=df['value'],
-                scatter=False,
-                color=sns.color_palette("rocket")[4],
-                line_kws={"linewidth": 2.5},
-                ax=ax
-            )
+        if len(dates_sorted) > 1:
+            # Convert dates to numbers for linear regression
+            x_numeric = mdates.date2num(dates_sorted)
+            y = np.array(metric_values_sorted)
             
-            # Calculate the actual trend line for reporting the slope
-            x_numeric = mdates.date2num(df['date'])
-            slope, intercept = np.polyfit(x_numeric, df['value'], 1)
+            # Calculate linear regression
+            coeffs = np.polyfit(x_numeric, y, 1)
+            slope = coeffs[0]
+            intercept = coeffs[1]
+            
+            # Create line points
+            x_line = np.array([min(x_numeric), max(x_numeric)])
+            y_line = slope * x_line + intercept
+            
+            # Plot trend line
+            plt.plot(mdates.num2date(x_line), y_line, 'r-', linewidth=2, 
+                    label=f'Trend Line (Slope: {slope:.4f}% per day)')
             
             # Get the latest value from the trend line
-            latest_x = x_numeric[-1]
-            latest_value = slope * latest_x + intercept
-            
-            # Add a custom label for the trend line
-            ax.plot([], [], color=sns.color_palette("rocket")[4], linewidth=2.5, 
-                   label=f'Trend Line (Slope: {slope:.4f}% per day)')
+            latest_value = y_line[-1]
             
             # Add annotation for latest value
             if latest_value is not None:
@@ -216,61 +190,48 @@ class HullPerformanceAgent:
                 if metric_name == 'hull_roughness_power_loss':
                     if latest_value < 15:
                         condition = 'GOOD'
-                        color = sns.color_palette("Greens", n_colors=9)[6]
                     elif latest_value < 25:
                         condition = 'AVERAGE'
-                        color = sns.color_palette("Oranges", n_colors=9)[6]
                     else:
                         condition = 'POOR'
-                        color = sns.color_palette("Reds", n_colors=9)[6]
                 else:
                     condition = ''
-                    color = sns.color_palette("rocket")[4]
                 
-                # Add annotation with Seaborn styling
-                bbox_props = dict(
-                    boxstyle="round,pad=0.5", 
-                    fc="white", 
-                    ec=color, 
-                    alpha=0.9,
-                    lw=2
-                )
-                
-                ax.annotate(
+                # Simple annotation without fancy styling
+                plt.annotate(
                     f'Latest: {latest_value:.2f}%\nCondition: {condition}',
-                    xy=(df['date'].iloc[-1], latest_value),
-                    xytext=(30, 15),
+                    xy=(dates_sorted[-1], latest_value),
+                    xytext=(20, 10),
                     textcoords='offset points',
-                    bbox=bbox_props,
-                    fontsize=11,
-                    color=color,
-                    weight='bold',
-                    arrowprops=dict(
-                        arrowstyle="->",
-                        color=color,
-                        connectionstyle="arc3,rad=0.2"
-                    )
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+                    fontsize=10
                 )
         
-        # Improve styling
-        ax.set_xlabel('Date', fontweight='bold')
-        ax.set_ylabel(y_axis_title, fontweight='bold')
-        plt.title(chart_title, fontweight='bold', pad=20, fontsize=16)
+        # Basic styling
+        plt.xlabel('Date')
+        plt.ylabel(y_axis_title)
+        plt.title(chart_title)
         
-        # Format x-axis dates
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
-        plt.xticks(rotation=45, ha='right')
+        # Format x-axis dates with no overlapping
+        plt.gcf().autofmt_xdate()
+        
+        # Add a simple grid
+        plt.grid(True, linestyle='--', alpha=0.5)
         
         # Set y-axis to start at 0
-        ax.set_ylim(bottom=0)
+        plt.ylim(bottom=0)
         
-        # Add a professional-looking legend
-        ax.legend(loc='upper left', frameon=True, framealpha=0.95)
+        # Add a legend
+        plt.legend()
         
-        # Set tight layout
+        # Tight layout
         plt.tight_layout()
         
+        # For compatibility, return both the Matplotlib figure and the latest value
+        # Your report generator will need to handle the Matplotlib figure directly
+        fig = plt.gcf()  # Get current figure
+        
+        # Return the figure and latest value
         return fig, latest_value
     def get_hull_condition(self, hull_roughness):
         if hull_roughness < 15:
