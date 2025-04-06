@@ -114,7 +114,8 @@ class HullPerformanceAgent:
     
     def create_performance_chart(self, data, metric_name, chart_title, y_axis_title):
         """
-        Create a publication-quality hull performance chart with linear trend line using Matplotlib
+        Create a publication-quality hull performance chart using Matplotlib
+        and return a compatible Plotly figure
         """
         if not data:
             return None, None
@@ -123,8 +124,9 @@ class HullPerformanceAgent:
         import matplotlib.dates as mdates
         import pandas as pd
         import numpy as np
-        from matplotlib.ticker import MaxNLocator
-        import matplotlib.patheffects as path_effects
+        import io
+        import base64
+        import plotly.graph_objects as go
         
         # Prepare data
         df = pd.DataFrame({
@@ -136,16 +138,9 @@ class HullPerformanceAgent:
         df = df.sort_values('date')
         
         # Create the figure with high resolution
-        fig, ax = plt.subplots(figsize=(12, 8), dpi=300)
+        fig, ax = plt.subplots(figsize=(12, 8), dpi=150)
         
-        # Set high-quality styles
-        plt.rcParams['font.family'] = ['DejaVu Sans', 'Arial', 'Helvetica', 'sans-serif']
-        plt.rcParams['font.size'] = 12
-        plt.rcParams['axes.linewidth'] = 1.2
-        plt.rcParams['axes.labelsize'] = 14
-        plt.rcParams['axes.titlesize'] = 16
-        plt.rcParams['xtick.labelsize'] = 12
-        plt.rcParams['ytick.labelsize'] = 12
+        # Don't specify fonts - use system defaults
         
         # Add colored background zones for hull roughness power loss
         if metric_name == 'hull_roughness_power_loss':
@@ -181,7 +176,7 @@ class HullPerformanceAgent:
         
         # Add a color bar
         cbar = plt.colorbar(scatter, ax=ax)
-        cbar.set_label('Power Loss (%)', rotation=270, labelpad=20, fontsize=12)
+        cbar.set_label('Power Loss (%)', rotation=270, labelpad=20)
         
         # Calculate and plot linear trend
         latest_value = None
@@ -259,16 +254,11 @@ class HullPerformanceAgent:
                     ),
                     zorder=6  # Ensure annotation is on top
                 )
-                
-                # Add subtle shadow effect to make text stand out
-                annotation.set_path_effects([
-                    path_effects.withStroke(linewidth=3, foreground='white')
-                ])
         
         # Improve axis styling
-        ax.set_xlabel('Date', fontsize=14, fontweight='bold')
-        ax.set_ylabel(y_axis_title, fontsize=14, fontweight='bold')
-        ax.set_title(chart_title, fontsize=18, fontweight='bold', pad=20)
+        ax.set_xlabel('Date', fontweight='bold')
+        ax.set_ylabel(y_axis_title, fontweight='bold')
+        ax.set_title(chart_title, fontweight='bold', pad=20)
         
         # Format x-axis dates with no overlapping
         plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
@@ -294,27 +284,50 @@ class HullPerformanceAgent:
             framealpha=0.95,
             edgecolor='gray',
             fancybox=True,
-            shadow=True,
-            fontsize=10
+            shadow=True
         )
         
         # Set tight layout
         plt.tight_layout()
         
-        # Instead of returning a Plotly figure, return the Matplotlib figure directly
-        # and implement a compatible wrapper class for integration with your report generator
+        # Convert matplotlib figure to PNG image
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+        buf.seek(0)
         
-        class MatplotlibFigureWrapper:
-            def __init__(self, fig):
-                self.fig = fig
-                # Add a dummy update_layout method for compatibility
-                self.update_layout = lambda **kwargs: None
-                
-            def savefig(self, *args, **kwargs):
-                return self.fig.savefig(*args, **kwargs)
-    
-        # Return the wrapped figure and latest value
-        return MatplotlibFigureWrapper(fig), latest_value    
+        # Convert PNG to base64 string
+        img_str = base64.b64encode(buf.read()).decode()
+        
+        # Create a plotly figure with the image
+        plotly_fig = go.Figure()
+        
+        # Add the image as a plotly layout image
+        plotly_fig.add_layout_image(
+            dict(
+                source=f"data:image/png;base64,{img_str}",
+                xref="paper",
+                yref="paper",
+                x=0,
+                y=1,
+                sizex=1,
+                sizey=1,
+                sizing="stretch",
+                layer="below"
+            )
+        )
+        
+        # Set layout to match the image dimensions
+        plotly_fig.update_layout(
+            autosize=False,
+            width=1200,
+            height=800,
+            margin=dict(l=0, r=0, t=0, b=0)
+        )
+        
+        # Clean up the matplotlib figure to free memory
+        plt.close(fig)
+        
+        return plotly_fig, latest_value 
     def get_hull_condition(self, hull_roughness):
         if hull_roughness < 15:
             return "GOOD", "green"
