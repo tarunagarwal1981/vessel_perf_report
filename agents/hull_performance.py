@@ -125,11 +125,10 @@ class HullPerformanceAgent:
         import numpy as np
         from matplotlib.ticker import MaxNLocator
         
-        # Set up the styling
-        sns.set(style="whitegrid", font="Arial")
+        # Set up the styling - use a more generic font approach
+        sns.set(style="whitegrid")
         plt.rcParams["figure.figsize"] = (12, 8)
-        plt.rcParams["font.family"] = "sans-serif"
-        plt.rcParams["font.sans-serif"] = ["Arial"]
+        # Don't specify font family to use system defaults
         
         # Prepare data - ensure dates are in datetime format
         df = pd.DataFrame({
@@ -253,16 +252,13 @@ class HullPerformanceAgent:
             spine.set_visible(True)
             spine.set_color('lightgray')
         
-        # Add a watermark-like vessel name in the background
-        if metric_name == 'hull_roughness_power_loss':
-            ax.text(0.5, 0.5, data[0].get('vessel_name', '').upper(),
-                    transform=ax.transAxes, fontsize=60, color='gray',
-                    ha='center', va='center', alpha=0.07)
-        
         # Ensure tight layout
         plt.tight_layout()
         
-        # For Word doc, we'll return the figure to save as image
+        # For report generator integration, we need to create a compatible interface with plotly
+        # Let's create a wrapper with update_layout method
+        fig.update_layout = lambda **kwargs: None  # Dummy method to prevent errors
+        
         return fig, latest_value
     
     def get_hull_condition(self, hull_roughness):
