@@ -310,15 +310,18 @@ class CIIAgent:
         """
         Calculate reference CII based on capacity and ship type
         """
-        # Use exactly the same parameters as in the provided code
+        # Parameters with capacity thresholds
         params = {
-            'bulk_carrier': [{'capacity_threshold': 279000, 'a': 4745, 'c': 0.622}],
-            'gas_carrier': [{'capacity_threshold': 65000, 'a': 144050000000, 'c': 2.071}],
+            'bulk_carrier': [{'capacity_threshold': float('inf'), 'a': 4745, 'c': 0.622}],
+            'gas_carrier': [
+                {'capacity_threshold': 65000, 'a': 8104, 'c': 0.639},
+                {'capacity_threshold': float('inf'), 'a': 144050000000, 'c': 2.071}
+            ],
             'tanker': [{'capacity_threshold': float('inf'), 'a': 5247, 'c': 0.61}],
             'container_ship': [{'capacity_threshold': float('inf'), 'a': 1984, 'c': 0.489}],
             'general_cargo_ship': [{'capacity_threshold': float('inf'), 'a': 31948, 'c': 0.792}],
             'refrigerated_cargo_carrier': [{'capacity_threshold': float('inf'), 'a': 4600, 'c': 0.557}],
-            'lng_carrier': [{'capacity_threshold': 100000, 'a': 144790000000000, 'c': 2.673}],
+            'lng_carrier': [{'capacity_threshold': float('inf'), 'a': 144790000000000, 'c': 2.673}],
         }
         
         if capacity <= 0:
@@ -330,7 +333,18 @@ class CIIAgent:
             st.warning(f"Unknown ship type: {ship_type}. Using bulk carrier as default.")
             ship_params = params.get('bulk_carrier')
         
-        a, c = ship_params[0]['a'], ship_params[0]['c']
+        # Find the appropriate parameters based on capacity
+        a, c = None, None
+        
+        for param in ship_params:
+            if capacity < param['capacity_threshold']:
+                a, c = param['a'], param['c']
+                break
+        
+        # If no threshold was matched, use the last set of parameters
+        if a is None or c is None:
+            a, c = ship_params[-1]['a'], ship_params[-1]['c']
+        
         return a * (capacity ** -c)
     
     def _calculate_required_cii(self, reference_cii, year):
