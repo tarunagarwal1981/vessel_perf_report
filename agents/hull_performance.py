@@ -114,19 +114,21 @@ class HullPerformanceAgent:
     
     def create_performance_chart(self, data, metric_name, chart_title, y_axis_title):
         """
-        Create a publication-quality hull performance chart using Matplotlib
-        and return a compatible Plotly figure
+        Create a publication-quality hull performance chart with linear trend line using Altair
         """
         if not data:
             return None, None
         
-        import matplotlib.pyplot as plt
-        import matplotlib.dates as mdates
+        import altair as alt
         import pandas as pd
         import numpy as np
+        from vega_datasets import data as vega_data
+        import plotly.graph_objects as go
         import io
         import base64
-        import plotly.graph_objects as go
+        
+        # Set Altair renderer
+        alt.renderers.enable('default')
         
         # Prepare data
         df = pd.DataFrame({
@@ -137,174 +139,180 @@ class HullPerformanceAgent:
         # Sort by date
         df = df.sort_values('date')
         
-        # Create the figure with high resolution
-        fig, ax = plt.subplots(figsize=(12, 8), dpi=150)
-        
-        # Don't specify fonts - use system defaults
-        
-        # Add colored background zones for hull roughness power loss
-        if metric_name == 'hull_roughness_power_loss':
-            y_max = max(df['value'].max() * 1.2, 40)
-            
-            # Good zone (0-15%)
-            ax.axhspan(0, 15, color='#4CAF50', alpha=0.15, label='Good Condition')
-            
-            # Average zone (15-25%)
-            ax.axhspan(15, 25, color='#FFC107', alpha=0.15, label='Average Condition')
-            
-            # Poor zone (>25%)
-            ax.axhspan(25, y_max, color='#F44336', alpha=0.15, label='Poor Condition')
-            
-            # Add threshold lines
-            ax.axhline(y=15, color='#FFC107', linestyle='--', alpha=0.8, linewidth=2, 
-                       label='Good/Average Threshold (15%)')
-            ax.axhline(y=25, color='#F44336', linestyle='--', alpha=0.8, linewidth=2, 
-                       label='Average/Poor Threshold (25%)')
-        
-        # Create a colormap based on values
-        scatter = ax.scatter(
-            df['date'], 
-            df['value'],
-            s=100,  # Size of points
-            c=df['value'],  # Color by value
-            cmap='viridis',  # Professional colormap
-            alpha=0.8,
-            edgecolor='white',  # White edge for 3D effect
-            linewidth=1.5,
-            zorder=5  # Ensure points are above background
-        )
-        
-        # Add a color bar
-        cbar = plt.colorbar(scatter, ax=ax)
-        cbar.set_label('Power Loss (%)', rotation=270, labelpad=20)
-        
-        # Calculate and plot linear trend
+        # Calculate linear trend
         latest_value = None
         if len(df) > 1:
-            # Convert dates to numbers for linear regression
-            x_numeric = mdates.date2num(df['date'])
-            y = df['value'].values
+            # For the regression, add a numeric date column
+            df['date_num'] = (df['date'] - df['date'].min()).dt.total_seconds() / (24 * 3600)
             
-            # Calculate linear regression
-            coeffs = np.polyfit(x_numeric, y, 1)
+            # Fit the linear model
+            coeffs = np.polyfit(df['date_num'], df['value'], 1)
             slope = coeffs[0]
             intercept = coeffs[1]
             
-            # Calculate slope in percent per day
-            slope_per_day = slope
-            
-            # Create line points
-            x_line = np.array([x_numeric.min(), x_numeric.max()])
-            y_line = slope * x_line + intercept
-            
-            # Plot trend line
-            line = ax.plot(
-                mdates.num2date(x_line), 
-                y_line, 
-                color='#FF1493',  # Deep pink
-                linestyle='-', 
-                linewidth=3, 
-                label=f'Trend Line (Slope: {slope_per_day:.4f}% per day)',
-                zorder=4  # Ensure line is above background but below points
-            )
+            # Create trend data
+            trend_data = pd.DataFrame({
+                'date_num': [df['date_num'].min(), df['date_num'].max()],
+                'date': [df['date'].min(), df['date'].max()],
+                'trend': [
+                    intercept + slope * df['date_num'].min(),
+                    intercept + slope * df['date_num'].max()
+                ]
+            })
             
             # Get the latest value from the trend line
-            latest_value = y_line[-1]
+            latest_value = trend_data['trend'].iloc[-1]
             
-            # Add annotation for latest value
-            if latest_value is not None:
-                # Determine color and condition based on value
-                if metric_name == 'hull_roughness_power_loss':
-                    if latest_value < 15:
-                        color = '#4CAF50'  # Green
-                        condition = 'GOOD'
-                    elif latest_value < 25:
-                        color = '#FFC107'  # Amber
-                        condition = 'AVERAGE'
-                    else:
-                        color = '#F44336'  # Red
-                        condition = 'POOR'
+            # Determine condition based on latest value
+            if metric_name == 'hull_roughness_power_loss':
+                if latest_value < 15:
+                    condition = 'GOOD'
+                elif latest_value < 25:
+                    condition = 'AVERAGE'
                 else:
-                    color = '#FF1493'  # Pink
-                    condition = ''
-                
-                # Add text annotation with custom styling and arrow
-                annotation = ax.annotate(
-                    f'Latest: {latest_value:.2f}%\nCondition: {condition}',
-                    xy=(df['date'].iloc[-1], latest_value),  # Position at end of trend line
-                    xytext=(30, 20),  # Offset text for clarity
-                    textcoords='offset points',
-                    bbox=dict(
-                        boxstyle='round,pad=0.5',
-                        fc='white',
-                        ec=color,
-                        alpha=0.9,
-                        linewidth=2
-                    ),
-                    fontsize=12,
-                    color=color,
-                    weight='bold',
-                    ha='left',
-                    va='center',
-                    arrowprops=dict(
-                        arrowstyle='->',
-                        color=color,
-                        linewidth=2,
-                        connectionstyle="arc3,rad=0.2"
-                    ),
-                    zorder=6  # Ensure annotation is on top
-                )
+                    condition = 'POOR'
+            else:
+                condition = ''
+            
+            # Add information to trend data
+            trend_data['info'] = f"Latest: {latest_value:.2f}%\nCondition: {condition}\nSlope: {slope:.4f}% per day"
         
-        # Improve axis styling
-        ax.set_xlabel('Date', fontweight='bold')
-        ax.set_ylabel(y_axis_title, fontweight='bold')
-        ax.set_title(chart_title, fontweight='bold', pad=20)
-        
-        # Format x-axis dates with no overlapping
-        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
-        
-        # Set y-axis to start at 0
-        ax.set_ylim(bottom=0)
-        
-        # Add gridlines
-        ax.grid(True, linestyle='--', alpha=0.4, color='gray')
-        
-        # Add frame around the plot area
-        for spine in ax.spines.values():
-            spine.set_visible(True)
-            spine.set_linewidth(1.0)
-            spine.set_color('#333333')
-        
-        # Position legend for optimal visibility
-        legend = ax.legend(
-            loc='upper left', 
-            frameon=True, 
-            framealpha=0.95,
-            edgecolor='gray',
-            fancybox=True,
-            shadow=True
+        # Create the base chart
+        base = alt.Chart(df).encode(
+            x=alt.X('date:T', 
+                    title='Date',
+                    axis=alt.Axis(labelAngle=-45, format='%b %Y'))
         )
         
-        # Set tight layout
-        plt.tight_layout()
+        # Create background zones for thresholds if it's hull performance
+        if metric_name == 'hull_roughness_power_loss':
+            # Calculate the max y value for the chart
+            y_max = max(df['value'].max() * 1.2, 40)
+            
+            # Create data for the zones
+            zones_data = pd.DataFrame([
+                {'zone': 'Good', 'start': 0, 'end': 15, 'color': '#4CAF50'},
+                {'zone': 'Average', 'start': 15, 'end': 25, 'color': '#FFC107'},
+                {'zone': 'Poor', 'start': 25, 'end': y_max, 'color': '#F44336'}
+            ])
+            
+            # Create background colored zones
+            zones = alt.Chart(zones_data).mark_rect(opacity=0.15).encode(
+                y=alt.Y('start:Q', title='', scale=alt.Scale(domain=[0, y_max])),
+                y2=alt.Y2('end:Q'),
+                color=alt.Color('zone:N', 
+                              scale=alt.Scale(domain=['Good', 'Average', 'Poor'],
+                                             range=['#4CAF50', '#FFC107', '#F44336']),
+                              legend=alt.Legend(title="Hull Condition"))
+            ).properties(
+                width=800,
+                height=500
+            )
+            
+            # Create threshold lines
+            threshold_data = pd.DataFrame([
+                {'threshold': 'Good/Average (15%)', 'value': 15, 'color': '#FFC107'},
+                {'threshold': 'Average/Poor (25%)', 'value': 25, 'color': '#F44336'}
+            ])
+            
+            thresholds = alt.Chart(threshold_data).mark_rule(strokeDash=[5, 5]).encode(
+                y='value:Q',
+                color=alt.Color('threshold:N', 
+                              scale=alt.Scale(domain=['Good/Average (15%)', 'Average/Poor (25%)'],
+                                             range=['#FFC107', '#F44336']),
+                              legend=alt.Legend(title="Thresholds"))
+            )
         
-        # Convert matplotlib figure to PNG image
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-        buf.seek(0)
+        # Create main scatter plot
+        points = base.mark_circle(size=100).encode(
+            y=alt.Y('value:Q', 
+                    title=y_axis_title,
+                    scale=alt.Scale(domain=[0, max(df['value'].max() * 1.2, 40) if metric_name == 'hull_roughness_power_loss' else None])),
+            color=alt.Color('value:Q', 
+                          scale=alt.Scale(scheme='viridis'),
+                          legend=alt.Legend(title="Power Loss (%)")),
+            tooltip=['date:T', alt.Tooltip('value:Q', title='Power Loss', format='.2f')]
+        )
         
-        # Convert PNG to base64 string
-        img_str = base64.b64encode(buf.read()).decode()
+        # Create trend line if we have enough data
+        if len(df) > 1:
+            trend_line = alt.Chart(trend_data).mark_line(
+                color='#FF1493',
+                strokeWidth=3
+            ).encode(
+                x='date:T',
+                y='trend:Q'
+            )
+            
+            # Text annotation for the latest value
+            text = alt.Chart(trend_data.iloc[[-1]]).mark_text(
+                align='left',
+                baseline='middle',
+                dx=30,
+                fontSize=16,
+                fontWeight='bold'
+            ).encode(
+                x='date:T',
+                y='trend:Q',
+                text='info:N'
+            )
         
-        # Create a plotly figure with the image
+        # Combine all chart elements
+        if metric_name == 'hull_roughness_power_loss':
+            # Start with zones in the background
+            chart = zones
+            
+            # Add threshold lines
+            chart += thresholds
+            
+            # Add data points
+            chart += points
+            
+            # Add trend line and annotation if available
+            if len(df) > 1:
+                chart += trend_line
+                chart += text
+        else:
+            # Start with just the points
+            chart = points
+            
+            # Add trend line and annotation if available
+            if len(df) > 1:
+                chart += trend_line
+                chart += text
+        
+        # Configure the chart
+        chart = chart.properties(
+            title=chart_title,
+            width=800,
+            height=500
+        ).configure_axis(
+            grid=True,
+            gridColor='#DDDDDD',
+            titleFontSize=14,
+            titleFontWeight='bold',
+            labelFontSize=12
+        ).configure_title(
+            fontSize=18,
+            fontWeight='bold'
+        ).configure_legend(
+            titleFontSize=12,
+            labelFontSize=12
+        ).configure_view(
+            strokeWidth=1,
+            stroke='#DDDDDD'
+        )
+        
+        # Convert Altair chart to HTML
+        html = chart.to_html()
+        
+        # Create a Plotly figure wrapper for compatibility
         plotly_fig = go.Figure()
         
-        # Add the image as a plotly layout image
+        # Add the HTML as an iframe
         plotly_fig.add_layout_image(
             dict(
-                source=f"data:image/png;base64,{img_str}",
+                source=f"data:text/html;base64,{base64.b64encode(html.encode()).decode()}",
                 xref="paper",
                 yref="paper",
                 x=0,
@@ -316,16 +324,13 @@ class HullPerformanceAgent:
             )
         )
         
-        # Set layout to match the image dimensions
+        # Set layout to match the Altair chart dimensions
         plotly_fig.update_layout(
             autosize=False,
-            width=1200,
-            height=800,
+            width=900,
+            height=600,
             margin=dict(l=0, r=0, t=0, b=0)
         )
-        
-        # Clean up the matplotlib figure to free memory
-        plt.close(fig)
         
         return plotly_fig, latest_value 
     def get_hull_condition(self, hull_roughness):
