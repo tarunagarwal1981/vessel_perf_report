@@ -521,4 +521,17 @@ class AdvancedReportGenerator:
             
             return docx_file.getvalue()
         except Exception as e:
-            # Error handling code...
+            # Log the error
+            print(f"Error generating report: {str(e)}")
+            print(traceback.format_exc())
+            
+            # Create a simple error report
+            error_doc = Document()
+            error_doc.add_heading('ERROR: Report Generation Failed', 0)
+            # Add more error handling code as needed
+            
+            # Return the error document
+            error_file = BytesIO()
+            error_doc.save(error_file)
+            error_file.seek(0)
+            return error_file.getvalue()
