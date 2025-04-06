@@ -65,6 +65,9 @@ class CIIAgent:
             2025: 0.91, 
             2026: 0.89
         }
+        
+        # Lambda endpoint URL
+        self.lambda_url = "https://crcgfvseuzhdqhhvan5gz2hr4e0kirfy.lambda-url.ap-south-1.on.aws/"
     
     def run(self, vessel_data, selected_vessel):
         """
@@ -73,15 +76,22 @@ class CIIAgent:
         st.header("Carbon Intensity Indicator (CII) Analysis")
         
         try:
-            # Process data to calculate CII metrics
-            cii_data = self._process_cii_data(vessel_data, selected_vessel)
+            # Get start and end dates for filtering
+            end_date = date.today()
+            start_date = date(end_date.year, 1, 1)  # Jan 1st of current year
+            
+            # Fetch CII data from Lambda
+            cii_data = self._fetch_cii_data(selected_vessel, start_date, end_date)
             
             if cii_data:
+                # Process the CII data
+                processed_data = self._process_cii_data(cii_data, selected_vessel)
+                
                 # Display CII summary
-                self._display_cii_summary(cii_data)
+                self._display_cii_summary(processed_data)
                 
                 # Create and display CII trend chart
-                cii_chart = self._create_cii_trend_chart(cii_data)
+                cii_chart = self._create_cii_trend_chart(processed_data)
                 if cii_chart:
                     st.plotly_chart(cii_chart, use_container_width=True)
                 
@@ -92,29 +102,61 @@ class CIIAgent:
             st.error(f"Error in CII analysis: {str(e)}")
             st.code(traceback.format_exc())
     
+    def _fetch_cii_data(self, vessel_name, start_date, end_date):
+        """
+        Fetch CII data from Lambda function
+        """
+        try:
+            # Prepare request payload
+            payload = {
+                "operation": "getVesselCIIData",
+                "vesselName": vessel_name,
+                "startDate": start_date.isoformat(),
+                "endDate": end_date.isoformat()
+            }
+            
+            # Make request to Lambda
+            response = requests.post(
+                self.lambda_url,
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            # Check if request was successful
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("success"):
+                    return result.get("data", [])
+                else:
+                    st.error(f"API Error: {result.get('error', 'Unknown error')}")
+                    return []
+            else:
+                st.error(f"HTTP Error: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            st.error(f"Error fetching CII data from Lambda: {str(e)}")
+            return []
+    
     def _process_cii_data(self, vessel_data, selected_vessel):
         """
         Process vessel data to calculate CII metrics
         """
         try:
-            # Example of how to extract data for CII calculation
-            # In a real scenario, you would fetch this from your Lambda function
-            
-            # Filter data for the current vessel
-            vessel_specific_data = []
-            
-            for entry in vessel_data:
-                if 'VESSEL_NAME' in entry and entry['VESSEL_NAME'] == selected_vessel:
-                    vessel_specific_data.append(entry)
-            
-            if not vessel_specific_data:
+            if not vessel_data:
                 return None
             
-            # Extract vessel particulars (assuming these are available in vessel_data)
-            vessel_particulars = self._extract_vessel_particulars(vessel_specific_data)
+            # Extract vessel particulars from the first record
+            first_record = vessel_data[0]
+            vessel_particulars = {
+                'vessel_imo': first_record.get('vessel_imo'),
+                'vessel_type': first_record.get('vessel_type_particular'),
+                'imo_ship_type': self.vessel_type_mapping.get(first_record.get('vessel_type_particular'), 'bulk_carrier'),
+                'capacity': first_record.get('deadweight', 0)
+            }
             
             # Group data by month for trend analysis
-            monthly_data = self._group_data_by_month(vessel_specific_data)
+            monthly_data = self._group_data_by_month(vessel_data)
             
             # Calculate CII metrics for each month
             cii_metrics = self._calculate_monthly_cii(monthly_data, vessel_particulars)
@@ -129,32 +171,8 @@ class CIIAgent:
         
         except Exception as e:
             st.error(f"Error processing CII data: {str(e)}")
+            traceback.print_exc()
             return None
-    
-    def _extract_vessel_particulars(self, vessel_data):
-        """
-        Extract vessel particulars from data
-        """
-        # In a real scenario, this would extract actual vessel particulars
-        # For demonstration, we'll create sample data
-        
-        # Use the first entry to get vessel type and IMO
-        first_entry = vessel_data[0]
-        vessel_type = first_entry.get('VESSEL_TYPE', 'BULK CARRIER')
-        vessel_imo = first_entry.get('VESSEL_IMO', '9999999')
-        
-        # Map to IMO vessel type
-        imo_ship_type = self.vessel_type_mapping.get(vessel_type, 'bulk_carrier')
-        
-        # Assume a capacity based on vessel type
-        capacity = 80000  # Default capacity (deadweight tons)
-        
-        return {
-            'vessel_imo': vessel_imo,
-            'vessel_type': vessel_type,
-            'imo_ship_type': imo_ship_type,
-            'capacity': capacity
-        }
     
     def _group_data_by_month(self, vessel_data):
         """
@@ -162,34 +180,66 @@ class CIIAgent:
         """
         monthly_data = {}
         
-        # For demonstration, create sample monthly data
-        # In a real scenario, this would group actual data
-        
-        current_year = date.today().year
-        start_date = date(current_year, 1, 1)
-        end_date = date.today()
-        
-        # Generate monthly data points
-        current_date = start_date
-        while current_date <= end_date:
-            month_key = current_date.strftime('%Y-%m')
-            
-            # Generate sample data for this month
-            # In reality, you would aggregate actual vessel data
-            monthly_data[month_key] = {
-                'month': current_date,
-                'distance': np.random.uniform(8000, 12000),  # Sample distance in nautical miles
-                'co2_emissions': np.random.uniform(1500, 2500),  # Sample CO2 emissions in metric tons
-                'days_at_sea': np.random.randint(20, 30)  # Sample days at sea
-            }
-            
-            # Move to next month
-            if current_date.month == 12:
-                current_date = date(current_date.year + 1, 1, 1)
+        for record in vessel_data:
+            # Parse the report date
+            if isinstance(record['report_date'], str):
+                report_date = datetime.fromisoformat(record['report_date'].replace('Z', '+00:00')).date()
             else:
-                current_date = date(current_date.year, current_date.month + 1, 1)
+                report_date = record['report_date']
+            
+            # Create a key for the month (YYYY-MM)
+            month_key = f"{report_date.year}-{report_date.month:02d}"
+            
+            # Initialize month data if not present
+            if month_key not in monthly_data:
+                monthly_data[month_key] = {
+                    'month': date(report_date.year, report_date.month, 1),
+                    'distance': 0,
+                    'co2_emissions': 0,
+                    'days_at_sea': 0,
+                    'records': 0
+                }
+            
+            # Add distance traveled
+            distance = record.get('distance_travelled_actual', 0) or 0
+            monthly_data[month_key]['distance'] += distance
+            
+            # Calculate CO2 emissions from fuel consumption
+            co2 = self._calculate_co2_from_fuel(record)
+            monthly_data[month_key]['co2_emissions'] += co2
+            
+            # Count records for this month (as proxy for days at sea)
+            monthly_data[month_key]['records'] += 1
+            monthly_data[month_key]['days_at_sea'] += 1  # Assuming 1 record = 1 day at sea
         
         return monthly_data
+    
+    def _calculate_co2_from_fuel(self, record):
+        """
+        Calculate CO2 emissions from fuel consumption
+        """
+        co2_total = 0
+        
+        # Calculate CO2 for each fuel type
+        # Subtracting fuel consumed at port (FC prefix) from total fuel
+        hfo = (record.get('fuel_consumption_hfo', 0) or 0) - (record.get('fc_fuel_consumption_hfo', 0) or 0)
+        lfo = (record.get('fuel_consumption_lfo', 0) or 0) - (record.get('fc_fuel_consumption_lfo', 0) or 0)
+        go_do = (record.get('fuel_consumption_go_do', 0) or 0) - (record.get('fc_fuel_consumption_go_do', 0) or 0)
+        lng = (record.get('fuel_consumption_lng', 0) or 0) - (record.get('fc_fuel_consumption_lng', 0) or 0)
+        lpg = (record.get('fuel_consumption_lpg', 0) or 0) - (record.get('fc_fuel_consumption_lpg', 0) or 0)
+        methanol = (record.get('fuel_consumption_methanol', 0) or 0) - (record.get('fc_fuel_consumption_methanol', 0) or 0)
+        ethanol = (record.get('fuel_consumption_ethanol', 0) or 0) - (record.get('fc_fuel_consumption_ethanol', 0) or 0)
+        
+        # Apply emission factors
+        co2_total += hfo * self.emission_factors['HFO']
+        co2_total += lfo * self.emission_factors['LFO']
+        co2_total += go_do * self.emission_factors['GO_DO']
+        co2_total += lng * self.emission_factors['LNG']
+        co2_total += lpg * self.emission_factors['LPG']
+        co2_total += methanol * self.emission_factors['METHANOL']
+        co2_total += ethanol * self.emission_factors['ETHANOL']
+        
+        return co2_total
     
     def _calculate_monthly_cii(self, monthly_data, vessel_particulars):
         """
@@ -214,6 +264,10 @@ class CIIAgent:
             month_date = month_data['month']
             distance = month_data['distance']
             co2 = month_data['co2_emissions']
+            
+            # Skip months with no distance or no CO2
+            if distance <= 0 or co2 <= 0:
+                continue
             
             # Calculate monthly AER
             monthly_aer = (co2 * 1000000) / (distance * capacity)
@@ -284,6 +338,10 @@ class CIIAgent:
         """
         Display summary of CII metrics
         """
+        if not cii_data or not cii_data.get('latest_cii'):
+            st.warning("No CII metrics available to display")
+            return
+            
         latest_cii = cii_data['latest_cii']
         vessel_name = cii_data['vessel_name']
         vessel_type = cii_data['vessel_particulars']['vessel_type']
@@ -351,6 +409,9 @@ class CIIAgent:
         Create CII trend chart
         """
         try:
+            if not cii_data or not cii_data.get('cii_metrics'):
+                return None
+                
             # Extract metrics for plotting
             metrics = cii_data['cii_metrics']
             
@@ -371,10 +432,8 @@ class CIIAgent:
                 marker=dict(
                     size=10,
                     color='rgba(0, 170, 255, 0.7)',
-                    line=dict(width=1, color='rgb(0, 120, 180)')
-                )
+                    line=dict(width=1, color='rgb(0, 120, 180)'))
             ))
-            
             # Add cumulative AER data (trend line)
             fig.add_trace(go.Scatter(
                 x=dates, 
@@ -395,7 +454,7 @@ class CIIAgent:
             ))
             
             # Add reference lines for CII ratings
-            # Assuming 'C' rating range is between required and required*1.05
+            # A-B boundary
             fig.add_trace(go.Scatter(
                 x=dates,
                 y=[r * 0.95 for r in required_cii],
@@ -404,6 +463,7 @@ class CIIAgent:
                 line=dict(color='rgb(139, 195, 74)', width=1, dash='dot')
             ))
             
+            # C-D boundary
             fig.add_trace(go.Scatter(
                 x=dates,
                 y=[r * 1.05 for r in required_cii],
@@ -412,6 +472,7 @@ class CIIAgent:
                 line=dict(color='rgb(255, 152, 0)', width=1, dash='dot')
             ))
             
+            # D-E boundary
             fig.add_trace(go.Scatter(
                 x=dates,
                 y=[r * 1.15 for r in required_cii],
@@ -448,6 +509,7 @@ class CIIAgent:
             
         except Exception as e:
             st.error(f"Error creating CII trend chart: {str(e)}")
+            traceback.print_exc()
             return None
     
     def get_cii_data_for_report(self, vessel_data, selected_vessel):
@@ -456,17 +518,27 @@ class CIIAgent:
         Returns CII metrics and chart for report
         """
         try:
-            # Process data to calculate CII metrics
-            cii_data = self._process_cii_data(vessel_data, selected_vessel)
+            # Determine date range for data (YTD)
+            end_date = date.today()
+            start_date = date(end_date.year, 1, 1)  # Jan 1st of current year
             
-            if not cii_data:
+            # Fetch CII data from Lambda instead of using passed vessel_data
+            cii_data_from_lambda = self._fetch_cii_data(selected_vessel, start_date, end_date)
+            
+            if not cii_data_from_lambda:
+                return None, None
+            
+            # Process data to calculate CII metrics
+            processed_data = self._process_cii_data(cii_data_from_lambda, selected_vessel)
+            
+            if not processed_data or not processed_data.get('latest_cii'):
                 return None, None
             
             # Create CII trend chart
-            cii_chart = self._create_cii_trend_chart(cii_data)
+            cii_chart = self._create_cii_trend_chart(processed_data)
             
             # Get the latest CII metrics
-            latest_cii = cii_data['latest_cii']
+            latest_cii = processed_data['latest_cii']
             
             # Format metrics for report
             cii_metrics = {
