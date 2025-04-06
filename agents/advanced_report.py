@@ -25,6 +25,9 @@ class AdvancedReportGenerator:
     def run(self, vessel_data, selected_vessel, hull_agent, speed_agent):
         st.header("Performance Report Generator")
         
+        # Troubleshooting data
+        self._troubleshoot_data(vessel_data)
+        
         try:
             # Create tabs for report view and download
             report_tab1, report_tab2 = st.tabs(["Report Preview", "Download Report"])
@@ -59,7 +62,7 @@ class AdvancedReportGenerator:
                 # Display hull performance chart from hull agent
                 st.subheader("Hull & Propeller Performance Analysis")
                 # Get filtered data and generate chart using the existing agent
-                hull_chart = self._get_hull_performance_chart_from_agent(vessel_data, hull_agent)
+                hull_chart, latest_power_loss = self._get_hull_performance_chart_from_agent(vessel_data, hull_agent)
                 if hull_chart:
                     st.plotly_chart(hull_chart, use_container_width=True, key=f"hull_preview_{str(uuid.uuid4())[:8]}")
                 
@@ -153,54 +156,98 @@ class AdvancedReportGenerator:
             st.error(f"Error in report generation UI: {str(e)}")
             st.code(traceback.format_exc())
     
+    def _troubleshoot_data(self, data):
+        """Analyze data for troubleshooting purposes"""
+        # Check for speed consumption data
+        has_speed = False
+        has_consumption = False
+        has_loading_condition = False
+        ballast_count = 0
+        laden_count = 0
+        
+        for entry in data:
+            if 'speed' in entry and entry['speed'] is not None:
+                has_speed = True
+            
+            if 'normalised_consumption' in entry and entry['normalised_consumption'] is not None:
+                has_consumption = True
+            
+            if 'loading_condition' in entry and entry['loading_condition'] is not None:
+                has_loading_condition = True
+                
+                # Count loading conditions
+                if entry['loading_condition'].lower() == 'ballast':
+                    ballast_count += 1
+                elif entry['loading_condition'].lower() == 'laden':
+                    laden_count += 1
+        
+        with st.expander("Data Troubleshooting"):
+            st.markdown(f"""
+            **Data Summary:**
+            - Total entries: {len(data)}
+            - Has speed data: {has_speed}
+            - Has consumption data: {has_consumption}
+            - Has loading condition data: {has_loading_condition}
+            - Ballast entries: {ballast_count}
+            - Laden entries: {laden_count}
+            """)
+            
+            # Show a sample of data
+            if len(data) > 0:
+                st.markdown("**Sample Data Entry:**")
+                st.json(data[0])
+    
     def _get_hull_metrics_from_agent(self, vessel_data, hull_agent):
         """Get hull metrics using the hull performance agent"""
         try:
-            # Filter data for power loss (same logic as in hull_agent)
-            filtered_data = []
-            for entry in vessel_data:
-                if 'report_date' in entry and 'hull_roughness_power_loss' in entry:
-                    if entry['hull_roughness_power_loss'] is not None:
-                        filtered_data.append(entry)
-    
-            if filtered_data:
-                # Sort by date
-                filtered_data.sort(key=lambda x: pd.to_datetime(x['report_date']))
-    
-                # Get latest power loss
-                power_loss = filtered_data[-1].get('hull_roughness_power_loss', 0)
-    
-                # Get condition using the agent's method
-                condition, _ = hull_agent.get_hull_condition(power_loss)
-    
-                # Calculate savings (formula can be adjusted)
-                fuel_savings = (power_loss - 15) * 0.05 if power_loss > 15 else 0
-    
-                # Generate recommendation
-                if power_loss < 15:
-                    recommendation = "Hull and propeller performance is good. No action required."
-                elif 15 <= power_loss < 25:
-                    recommendation = "Consider hull cleaning at next convenient opportunity."
+            # Get hull chart to extract the latest power loss from the trend line
+            _, latest_power_loss = self._get_hull_performance_chart_from_agent(vessel_data, hull_agent)
+            
+            if latest_power_loss is None:
+                # Fallback if no trend line data is available
+                # Filter data for power loss (same logic as in hull_agent)
+                filtered_data = []
+                for entry in vessel_data:
+                    if 'report_date' in entry and 'hull_roughness_power_loss' in entry:
+                        if entry['hull_roughness_power_loss'] is not None:
+                            filtered_data.append(entry)
+        
+                if filtered_data:
+                    # Sort by date
+                    filtered_data.sort(key=lambda x: pd.to_datetime(x['report_date']))
+        
+                    # Get latest power loss
+                    power_loss = filtered_data[-1].get('hull_roughness_power_loss', 0)
                 else:
-                    recommendation = "Hull cleaning recommended as soon as possible."
-    
-                return {
-                    'condition': condition,
-                    'power_loss': power_loss,
-                    'fuel_savings': fuel_savings,
-                    'recommendation': recommendation
-                }
+                    power_loss = 0
             else:
-                return {
-                    'condition': "Unknown",
-                    'power_loss': 0,
-                    'fuel_savings': 0,
-                    'recommendation': "Insufficient data to provide recommendation."
-                }
+                # Use the value from the trend line
+                power_loss = latest_power_loss
     
+            # Get condition using the agent's method
+            condition, _ = hull_agent.get_hull_condition(power_loss)
+    
+            # Calculate savings (formula can be adjusted)
+            fuel_savings = (power_loss - 15) * 0.05 if power_loss > 15 else 0
+    
+            # Generate recommendation
+            if power_loss < 15:
+                recommendation = "Hull and propeller performance is good. No action required."
+            elif 15 <= power_loss < 25:
+                recommendation = "Consider hull cleaning at next convenient opportunity."
+            else:
+                recommendation = "Hull cleaning recommended as soon as possible."
+    
+            return {
+                'condition': condition,
+                'power_loss': power_loss,
+                'fuel_savings': fuel_savings,
+                'recommendation': recommendation
+            }
         except Exception as e:
             # Log the error
             print(f"Error extracting hull metrics: {str(e)}")
+            traceback.print_exc()
             return {
                 'condition': "Error",
                 'power_loss': 0,
@@ -233,13 +280,14 @@ class AdvancedReportGenerator:
             }
         except Exception as e:
             print(f"Error extracting speed metrics: {str(e)}")
+            traceback.print_exc()
             return {
                 'ballast_avg': 0,
                 'laden_avg': 0
             }
     
     def _get_hull_performance_chart_from_agent(self, vessel_data, hull_agent):
-        """Get hull performance chart from the hull agent"""
+        """Get hull performance chart from the hull agent with trend line value"""
         try:
             # Filter data for hull performance
             filtered_data = []
@@ -250,17 +298,39 @@ class AdvancedReportGenerator:
             
             if filtered_data:
                 # Use the agent's chart creation method
-                chart, _ = hull_agent.create_performance_chart(
+                chart, latest_value = hull_agent.create_performance_chart(
                     filtered_data,
                     'hull_roughness_power_loss',
                     "Hull Roughness - Excess Power Trend",
                     "Excess Power (%)"
                 )
-                return chart
-            return None
+                
+                # Optimize chart for full-width display
+                if chart is not None:
+                    # Adjust layout for better full-width display
+                    chart.update_layout(
+                        height=450,  # Slightly shorter height for better aspect ratio
+                        margin=dict(l=50, r=50, t=60, b=50),  # More balanced margins
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="center",
+                            x=0.5  # Center the legend
+                        ),
+                        # Increase font sizes for better readability
+                        title=dict(font=dict(size=20)),
+                        xaxis=dict(title=dict(font=dict(size=16))),
+                        yaxis=dict(title=dict(font=dict(size=16)))
+                    )
+                
+                return chart, latest_value
+            
+            return None, None
         except Exception as e:
             print(f"Error creating hull performance chart: {str(e)}")
-            return None
+            traceback.print_exc()
+            return None, None
     
     def _get_speed_consumption_charts_from_agent(self, vessel_data, speed_agent):
         """Get speed consumption charts from the speed agent"""
@@ -285,6 +355,14 @@ class AdvancedReportGenerator:
                     "Speed vs. Consumption - Ballast Condition"
                 )
                 
+                # Optimize ballast chart for side-by-side display
+                if ballast_chart:
+                    ballast_chart.update_layout(
+                        height=400,  # Reduced height for side-by-side
+                        margin=dict(l=40, r=40, t=50, b=50),
+                        font=dict(size=12)  # Smaller font for side-by-side
+                    )
+                
                 # Generate laden chart using speed_agent's method
                 laden_chart = speed_agent.create_speed_consumption_chart(
                     filtered_data_consumption,
@@ -292,10 +370,18 @@ class AdvancedReportGenerator:
                     "Speed vs. Consumption - Laden Condition"
                 )
                 
+                # Optimize laden chart for side-by-side display
+                if laden_chart:
+                    laden_chart.update_layout(
+                        height=400,  # Reduced height for side-by-side
+                        margin=dict(l=40, r=40, t=50, b=50),
+                        font=dict(size=12)  # Smaller font for side-by-side
+                    )
+            
             return ballast_chart, laden_chart
         except Exception as e:
             print(f"Error creating speed consumption charts: {str(e)}")
-            traceback.print_exc()  # Print full traceback for debugging
+            traceback.print_exc()
             return None, None
     
     def _save_chart_as_image(self, fig):
@@ -310,20 +396,23 @@ class AdvancedReportGenerator:
             fig_copy.update_layout(
                 template="plotly_white",  # Better for print
                 height=600,
-                width=800,
+                width=1000,  # Increased width for better aspect ratio
                 margin=dict(l=40, r=40, t=50, b=40),
                 font=dict(color='black', size=14)
             )
             
             # Create temporary file
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp:
-                fig_copy.write_image(temp.name, scale=2)
+                # Use higher scale for better resolution
+                fig_copy.write_image(temp.name, scale=3)
                 return temp.name
         except Exception as e:
             print(f"Error saving chart image: {str(e)}")
+            traceback.print_exc()
             return None
     
     def _replace_text_in_document(self, doc, replacements):
+        """Replace text in all parts of the document including headers/footers"""
         # Replace in paragraphs
         for paragraph in doc.paragraphs:
             for key, value in replacements.items():
@@ -338,12 +427,57 @@ class AdvancedReportGenerator:
                         for key, value in replacements.items():
                             if key in paragraph.text:
                                 paragraph.text = paragraph.text.replace(key, value)
+        
+        # Replace in headers and footers
+        for section in doc.sections:
+            # Headers
+            for paragraph in section.header.paragraphs:
+                for key, value in replacements.items():
+                    if key in paragraph.text:
+                        paragraph.text = paragraph.text.replace(key, value)
+            
+            # Also check header tables
+            for table in section.header.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            for key, value in replacements.items():
+                                if key in paragraph.text:
+                                    paragraph.text = paragraph.text.replace(key, value)
+            
+            # Footers
+            for paragraph in section.footer.paragraphs:
+                for key, value in replacements.items():
+                    if key in paragraph.text:
+                        paragraph.text = paragraph.text.replace(key, value)
+            
+            # Also check footer tables
+            for table in section.footer.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            for key, value in replacements.items():
+                                if key in paragraph.text:
+                                    paragraph.text = paragraph.text.replace(key, value)
     
-    def _replace_chart_in_document(self, doc, placeholder, chart):
+    def _replace_chart_in_document(self, doc, placeholder, chart, width_inches=None):
+        """
+        Replace a placeholder in the document with a chart image
+        
+        Parameters:
+        - doc: The Document object
+        - placeholder: The text placeholder to replace
+        - chart: The plotly chart object
+        - width_inches: Optional width in inches (defaults to 6.0 for most charts or 7.5 for full width)
+        """
         # Save chart as image
         chart_path = self._save_chart_as_image(chart)
         if not chart_path:
             return False
+        
+        # Default width if not specified
+        if width_inches is None:
+            width_inches = 6.0
         
         # Find and replace the placeholder with the image
         replaced = False
@@ -355,7 +489,7 @@ class AdvancedReportGenerator:
                     paragraph.text = ""
                     # Add picture
                     run = paragraph.add_run()
-                    run.add_picture(chart_path, width=Inches(6.0))
+                    run.add_picture(chart_path, width=Inches(width_inches))
                     replaced = True
                     break
             
@@ -370,7 +504,11 @@ class AdvancedReportGenerator:
                                     paragraph.text = ""
                                     # Add picture
                                     run = paragraph.add_run()
-                                    run.add_picture(chart_path, width=Inches(3.0))
+                                    # For tables, use a smaller width or adjust based on table cell
+                                    cell_width = width_inches
+                                    if cell_width > 3.5:  # Limit image width in table cells
+                                        cell_width = 3.5
+                                    run.add_picture(chart_path, width=Inches(cell_width))
                                     replaced = True
                                     break
                             if replaced:
@@ -389,6 +527,7 @@ class AdvancedReportGenerator:
             return replaced
         except Exception as e:
             print(f"Error replacing chart: {str(e)}")
+            traceback.print_exc()
             return False
     
     def _generate_formatted_report(self, vessel_name, report_date, analyst_name, hull_metrics, 
@@ -483,18 +622,18 @@ class AdvancedReportGenerator:
                     st.error(f"Error replacing text: {str(e)}")
             
             # Try to replace charts
-            # Try to replace charts
             try:
                 with debug_expander:
                     st.write("Generating and replacing charts...")
                 
                 # Generate hull performance chart using the agent
-                hull_chart = self._get_hull_performance_chart_from_agent(vessel_data, hull_agent)
+                hull_chart, latest_power_loss = self._get_hull_performance_chart_from_agent(vessel_data, hull_agent)
                 if hull_chart:
-                    success = self._replace_chart_in_document(doc, '{{HULL_PERFORMANCE_CHART}}', hull_chart)
+                    # Use 7.5 inches for full page width (typical A4 page width is about 8.3 inches, leaving margins)
+                    success = self._replace_chart_in_document(doc, '{{HULL_PERFORMANCE_CHART}}', hull_chart, width_inches=7.5)
                     with debug_expander:
                         if success:
-                            st.write("✅ Hull performance chart replaced")
+                            st.write("✅ Hull performance chart replaced (full width)")
                         else:
                             st.warning("⚠️ Hull performance chart placeholder not found")
                 else:
@@ -510,10 +649,11 @@ class AdvancedReportGenerator:
                     st.write(f"Laden chart available: {laden_chart is not None}")
                 
                 if ballast_chart:
-                    success = self._replace_chart_in_document(doc, '{{BALLAST_CHART}}', ballast_chart)
+                    # Use 3.5 inches width for side-by-side charts (7 inches total width)
+                    success = self._replace_chart_in_document(doc, '{{BALLAST_CHART}}', ballast_chart, width_inches=3.5)
                     with debug_expander:
                         if success:
-                            st.write("✅ Ballast chart replaced")
+                            st.write("✅ Ballast chart replaced (side-by-side)")
                         else:
                             st.warning("⚠️ Ballast chart placeholder not found or could not be replaced")
                 else:
@@ -521,10 +661,11 @@ class AdvancedReportGenerator:
                         st.warning("⚠️ No ballast chart data available")
                 
                 if laden_chart:
-                    success = self._replace_chart_in_document(doc, '{{LADEN_CHART}}', laden_chart)
+                    # Use 3.5 inches width for side-by-side charts (7 inches total width)
+                    success = self._replace_chart_in_document(doc, '{{LADEN_CHART}}', laden_chart, width_inches=3.5)
                     with debug_expander:
                         if success:
-                            st.write("✅ Laden chart replaced")
+                            st.write("✅ Laden chart replaced (side-by-side)")
                         else:
                             st.warning("⚠️ Laden chart placeholder not found or could not be replaced")
                 else:
@@ -534,7 +675,7 @@ class AdvancedReportGenerator:
                 with debug_expander:
                     st.error(f"Error replacing charts: {str(e)}")
                     st.code(traceback.format_exc())
-                        
+            
             # Save to memory
             with debug_expander:
                 st.write("Saving document...")
