@@ -468,6 +468,7 @@ class AdvancedReportGenerator:
                     st.error(f"Error replacing text: {str(e)}")
             
             # Try to replace charts
+            # Try to replace charts
             try:
                 with debug_expander:
                     st.write("Generating and replacing charts...")
@@ -481,16 +482,28 @@ class AdvancedReportGenerator:
                             st.write("✅ Hull performance chart replaced")
                         else:
                             st.warning("⚠️ Hull performance chart placeholder not found")
+                else:
+                    with debug_expander:
+                        st.warning("⚠️ No hull performance chart data available")
                 
                 # Generate and replace speed consumption charts using the agent
                 ballast_chart, laden_chart = self._get_speed_consumption_charts_from_agent(vessel_data, speed_agent)
+                
+                # Debug speed charts
+                with debug_expander:
+                    st.write(f"Ballast chart available: {ballast_chart is not None}")
+                    st.write(f"Laden chart available: {laden_chart is not None}")
+                
                 if ballast_chart:
                     success = self._replace_chart_in_document(doc, '{{BALLAST_CHART}}', ballast_chart)
                     with debug_expander:
                         if success:
                             st.write("✅ Ballast chart replaced")
                         else:
-                            st.warning("⚠️ Ballast chart placeholder not found")
+                            st.warning("⚠️ Ballast chart placeholder not found or could not be replaced")
+                else:
+                    with debug_expander:
+                        st.warning("⚠️ No ballast chart data available")
                 
                 if laden_chart:
                     success = self._replace_chart_in_document(doc, '{{LADEN_CHART}}', laden_chart)
@@ -498,11 +511,15 @@ class AdvancedReportGenerator:
                         if success:
                             st.write("✅ Laden chart replaced")
                         else:
-                            st.warning("⚠️ Laden chart placeholder not found")
+                            st.warning("⚠️ Laden chart placeholder not found or could not be replaced")
+                else:
+                    with debug_expander:
+                        st.warning("⚠️ No laden chart data available")
             except Exception as e:
                 with debug_expander:
                     st.error(f"Error replacing charts: {str(e)}")
-            
+                    st.code(traceback.format_exc())
+                        
             # Save to memory
             with debug_expander:
                 st.write("Saving document...")
