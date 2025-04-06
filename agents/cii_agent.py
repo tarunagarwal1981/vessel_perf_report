@@ -140,7 +140,7 @@ class CIIAgent:
     
     def _process_cii_data(self, vessel_data, selected_vessel):
         """
-        Process vessel data to calculate CII metrics
+        Process vessel data to calculate CII metrics on a daily basis
         """
         try:
             if not vessel_data:
@@ -152,19 +152,18 @@ class CIIAgent:
                 'vessel_imo': first_record.get('vessel_imo'),
                 'vessel_type': first_record.get('vessel_type_particular'),
                 'imo_ship_type': self.vessel_type_mapping.get(first_record.get('vessel_type_particular'), 'bulk_carrier'),
-                'capacity': first_record.get('deadweight', 0)
+                'capacity': self._safe_float(first_record.get('deadweight', 0))
             }
             
-            # Group data by month for trend analysis
-            monthly_data = self._group_data_by_month(vessel_data)
+            # Sort data by date
+            sorted_data = sorted(vessel_data, key=lambda x: self._parse_date(x.get('report_date')))
             
-            # Calculate CII metrics for each month
-            cii_metrics = self._calculate_monthly_cii(monthly_data, vessel_particulars)
+            # Calculate daily cumulative CII metrics
+            cii_metrics = self._calculate_daily_cii(sorted_data, vessel_particulars)
             
             return {
                 'vessel_name': selected_vessel,
                 'vessel_particulars': vessel_particulars,
-                'monthly_data': monthly_data,
                 'cii_metrics': cii_metrics,
                 'latest_cii': cii_metrics[-1] if cii_metrics else None
             }
@@ -174,98 +173,49 @@ class CIIAgent:
             traceback.print_exc()
             return None
     
-    def _group_data_by_month(self, vessel_data):
+    def _parse_date(self, date_str):
         """
-        Group vessel data by month for trend analysis
+        Parse date string to datetime.date object
         """
-        monthly_data = {}
-        
-        for record in vessel_data:
-            # Parse the report date
-            if isinstance(record['report_date'], str):
-                report_date = datetime.fromisoformat(record['report_date'].replace('Z', '+00:00')).date()
-            else:
-                report_date = record['report_date']
-            
-            # Create a key for the month (YYYY-MM)
-            month_key = f"{report_date.year}-{report_date.month:02d}"
-            
-            # Initialize month data if not present
-            if month_key not in monthly_data:
-                monthly_data[month_key] = {
-                    'month': date(report_date.year, report_date.month, 1),
-                    'distance': 0,
-                    'co2_emissions': 0,
-                    'days_at_sea': 0,
-                    'records': 0
-                }
-            
-            # Get distance and convert to float if it's a string
-            distance = record.get('distance_travelled_actual', 0)
-            if distance is None:
-                distance = 0
-            elif isinstance(distance, str):
+        if isinstance(date_str, str):
+            try:
+                # Remove 'Z' and timezone info if present
+                date_str = date_str.replace('Z', '')
+                if '+' in date_str:
+                    date_str = date_str.split('+')[0]
+                return datetime.fromisoformat(date_str).date()
+            except ValueError:
+                # Try parsing with different format if ISO format fails
                 try:
-                    distance = float(distance)
-                except (ValueError, TypeError):
-                    distance = 0
-            
-            # Add distance traveled
-            monthly_data[month_key]['distance'] += distance
-            
-            # Calculate CO2 emissions from fuel consumption
-            co2 = self._calculate_co2_from_fuel(record)
-            monthly_data[month_key]['co2_emissions'] += co2
-            
-            # Count records for this month (as proxy for days at sea)
-            monthly_data[month_key]['records'] += 1
-            monthly_data[month_key]['days_at_sea'] += 1  # Assuming 1 record = 1 day at sea
-        
-        return monthly_data
+                    return datetime.strptime(date_str, '%Y-%m-%d').date()
+                except ValueError:
+                    return date.today()
+        elif isinstance(date_str, datetime):
+            return date_str.date()
+        elif isinstance(date_str, date):
+            return date_str
+        else:
+            return date.today()
     
-    def _calculate_co2_from_fuel(self, record):
+    def _safe_float(self, value, default=0.0):
         """
-        Calculate CO2 emissions from fuel consumption
+        Safely convert value to float
         """
-        co2_total = 0
-        
-        # Helper function to safely convert string to float
-        def safe_float(value, default=0):
-            if value is None:
-                return default
-            if isinstance(value, (int, float)):
-                return float(value)
-            if isinstance(value, str):
-                try:
-                    return float(value)
-                except (ValueError, TypeError):
-                    return default
+        if value is None:
             return default
-        
-        # Calculate CO2 for each fuel type
-        # Subtracting fuel consumed at port (FC prefix) from total fuel
-        hfo = safe_float(record.get('fuel_consumption_hfo')) - safe_float(record.get('fc_fuel_consumption_hfo'))
-        lfo = safe_float(record.get('fuel_consumption_lfo')) - safe_float(record.get('fc_fuel_consumption_lfo'))
-        go_do = safe_float(record.get('fuel_consumption_go_do')) - safe_float(record.get('fc_fuel_consumption_go_do'))
-        lng = safe_float(record.get('fuel_consumption_lng')) - safe_float(record.get('fc_fuel_consumption_lng'))
-        lpg = safe_float(record.get('fuel_consumption_lpg')) - safe_float(record.get('fc_fuel_consumption_lpg'))
-        methanol = safe_float(record.get('fuel_consumption_methanol')) - safe_float(record.get('fc_fuel_consumption_methanol'))
-        ethanol = safe_float(record.get('fuel_consumption_ethanol')) - safe_float(record.get('fc_fuel_consumption_ethanol'))
-        
-        # Apply emission factors
-        co2_total += hfo * self.emission_factors['HFO']
-        co2_total += lfo * self.emission_factors['LFO']
-        co2_total += go_do * self.emission_factors['GO_DO']
-        co2_total += lng * self.emission_factors['LNG']
-        co2_total += lpg * self.emission_factors['LPG']
-        co2_total += methanol * self.emission_factors['METHANOL']
-        co2_total += ethanol * self.emission_factors['ETHANOL']
-        
-        return co2_total
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return default
+        return default
     
-    def _calculate_monthly_cii(self, monthly_data, vessel_particulars):
+    def _calculate_daily_cii(self, sorted_data, vessel_particulars):
         """
-        Calculate CII metrics for each month
+        Calculate CII metrics on a daily YTD basis
+        Returns cumulative values for each day
         """
         cii_metrics = []
         capacity = vessel_particulars['capacity']
@@ -275,54 +225,89 @@ class CIIAgent:
         reference_cii = self._calculate_reference_cii(capacity, imo_ship_type)
         
         # Calculate required CII for the current year
-        current_year = date.today().year
+        current_year = sorted_data[0]['report_date'].year if sorted_data else date.today().year
         required_cii = self._calculate_required_cii(reference_cii, current_year)
         
         cumulative_distance = 0
         cumulative_co2 = 0
         
-        # Calculate metrics for each month
-        for month_key, month_data in sorted(monthly_data.items()):
-            month_date = month_data['month']
-            distance = month_data['distance']
-            co2 = month_data['co2_emissions']
+        # Process each day's data
+        for record in sorted_data:
+            # Parse date
+            report_date = self._parse_date(record.get('report_date'))
             
-            # Skip months with no distance or no CO2
-            if distance <= 0 or co2 <= 0:
+            # Get distance and CO2 for this day
+            distance = self._safe_float(record.get('distance_travelled_actual', 0))
+            co2 = self._calculate_co2_from_fuel(record)
+            
+            # Skip days with no distance
+            if distance <= 0:
                 continue
             
-            # Calculate monthly AER
-            monthly_aer = (co2 * 1000000) / (distance * capacity)
-            
-            # Calculate cumulative values
+            # Update cumulative values
             cumulative_distance += distance
             cumulative_co2 += co2
             
-            # Calculate cumulative AER (YTD)
-            cumulative_aer = (cumulative_co2 * 1000000) / (cumulative_distance * capacity)
-            
-            # Determine CII rating
-            cii_rating = self._calculate_cii_rating(cumulative_aer, required_cii)
-            
-            cii_metrics.append({
-                'date': month_date,
-                'month': month_date.strftime('%b %Y'),
-                'monthly_aer': monthly_aer,
-                'cumulative_aer': cumulative_aer,
-                'required_cii': required_cii,
-                'cii_rating': cii_rating,
-                'distance': distance,
-                'co2_emissions': co2,
-                'cumulative_distance': cumulative_distance,
-                'cumulative_co2': cumulative_co2
-            })
+            # Calculate AER (only if we have both distance and CO2)
+            if cumulative_distance > 0 and capacity > 0:
+                # YTD AER calculation
+                ytd_aer = (cumulative_co2 * 1000000) / (cumulative_distance * capacity)
+                
+                # Determine CII rating
+                cii_rating = self._calculate_cii_rating(ytd_aer, required_cii)
+                
+                # Store metrics for this day
+                cii_metrics.append({
+                    'date': report_date,
+                    'daily_distance': distance,
+                    'daily_co2': co2,
+                    'cumulative_distance': cumulative_distance,
+                    'cumulative_co2': cumulative_co2,
+                    'attained_aer': ytd_aer,
+                    'required_cii': required_cii,
+                    'cii_rating': cii_rating
+                })
         
         return cii_metrics
+    
+    def _calculate_co2_from_fuel(self, record):
+        """
+        Calculate CO2 emissions from fuel consumption
+        """
+        # Helper function to safely handle numeric values
+        def safe_value(v):
+            return self._safe_float(v)
+        
+        # Calculate CO2 for each fuel type
+        # Subtracting fuel consumed at port (FC prefix) from total fuel
+        hfo = safe_value(record.get('fuel_consumption_hfo')) - safe_value(record.get('fc_fuel_consumption_hfo'))
+        lfo = safe_value(record.get('fuel_consumption_lfo')) - safe_value(record.get('fc_fuel_consumption_lfo'))
+        go_do = safe_value(record.get('fuel_consumption_go_do')) - safe_value(record.get('fc_fuel_consumption_go_do'))
+        lng = safe_value(record.get('fuel_consumption_lng')) - safe_value(record.get('fc_fuel_consumption_lng'))
+        lpg = safe_value(record.get('fuel_consumption_lpg')) - safe_value(record.get('fc_fuel_consumption_lpg'))
+        methanol = safe_value(record.get('fuel_consumption_methanol')) - safe_value(record.get('fc_fuel_consumption_methanol'))
+        ethanol = safe_value(record.get('fuel_consumption_ethanol')) - safe_value(record.get('fc_fuel_consumption_ethanol'))
+        
+        # Apply emission factors
+        co2_total = 0
+        co2_total += max(0, hfo) * self.emission_factors['HFO']  # Ensure no negative values
+        co2_total += max(0, lfo) * self.emission_factors['LFO']
+        co2_total += max(0, go_do) * self.emission_factors['GO_DO']
+        co2_total += max(0, lng) * self.emission_factors['LNG']
+        co2_total += max(0, lpg) * self.emission_factors['LPG']
+        co2_total += max(0, methanol) * self.emission_factors['METHANOL']
+        co2_total += max(0, ethanol) * self.emission_factors['ETHANOL']
+        
+        return co2_total
     
     def _calculate_reference_cii(self, capacity, ship_type):
         """
         Calculate reference CII based on capacity and ship type
         """
+        if capacity <= 0:
+            st.warning(f"Invalid capacity: {capacity}. Using default value.")
+            capacity = 10000  # Default fallback value
+            
         # Use the reference parameters for the ship type
         ship_params = self.cii_reference_params.get(ship_type.lower())
         if not ship_params:
@@ -386,8 +371,8 @@ class CIIAgent:
             st.markdown("### Attained AER")
             st.metric(
                 "Current AER",
-                f"{latest_cii['cumulative_aer']:.2f} gCO₂/dwt-nm",
-                delta=f"{latest_cii['cumulative_aer'] - latest_cii['required_cii']:.2f} vs Required",
+                f"{latest_cii['attained_aer']:.2f} gCO₂/dwt-nm",
+                delta=f"{latest_cii['attained_aer'] - latest_cii['required_cii']:.2f} vs Required",
                 delta_color="inverse"
             )
         
@@ -428,7 +413,7 @@ class CIIAgent:
     
     def _create_cii_trend_chart(self, cii_data):
         """
-        Create CII trend chart
+        Create CII trend chart showing daily trend of AER values
         """
         try:
             if not cii_data or not cii_data.get('cii_metrics'):
@@ -437,31 +422,30 @@ class CIIAgent:
             # Extract metrics for plotting
             metrics = cii_data['cii_metrics']
             
-            dates = [metric['date'] for metric in metrics]
-            cumulative_aer = [metric['cumulative_aer'] for metric in metrics]
-            monthly_aer = [metric['monthly_aer'] for metric in metrics]
-            required_cii = [metric['required_cii'] for metric in metrics]
+            # Select points for chart (to avoid overcrowding)
+            # If more than 30 points, sample data to reduce density
+            sampled_metrics = metrics
+            if len(metrics) > 30:
+                # Take every nth point to get about 30 points
+                n = max(1, len(metrics) // 30)
+                sampled_metrics = metrics[::n]
+                # Always include the latest point
+                if sampled_metrics[-1] != metrics[-1]:
+                    sampled_metrics.append(metrics[-1])
+            
+            dates = [metric['date'] for metric in sampled_metrics]
+            attained_aer = [metric['attained_aer'] for metric in sampled_metrics]
+            required_cii = [metric['required_cii'] for metric in sampled_metrics]
             
             # Create figure
             fig = go.Figure()
             
-            # Add monthly AER data (individual points)
+            # Add AER trend line
             fig.add_trace(go.Scatter(
                 x=dates, 
-                y=monthly_aer,
-                mode='markers',
-                name='Monthly AER',
-                marker=dict(
-                    size=10,
-                    color='rgba(0, 170, 255, 0.7)',
-                    line=dict(width=1, color='rgb(0, 120, 180)'))
-            ))
-            # Add cumulative AER data (trend line)
-            fig.add_trace(go.Scatter(
-                x=dates, 
-                y=cumulative_aer,
+                y=attained_aer,
                 mode='lines+markers',
-                name='Cumulative AER (YTD)',
+                name='YTD Attained AER',
                 line=dict(color='rgb(0, 170, 255)', width=3),
                 marker=dict(size=8)
             ))
@@ -503,28 +487,85 @@ class CIIAgent:
                 line=dict(color='rgb(244, 67, 54)', width=1, dash='dot')
             ))
             
+            # Add annotations for the rating zones
+            y_max = max(attained_aer) * 1.1
+            y_min = min([min(attained_aer), min([r * 0.95 for r in required_cii])]) * 0.9
+            
             # Update layout
             fig.update_layout(
-                title="Carbon Intensity Indicator (CII) Trend",
-                xaxis_title="Month",
+                title="Carbon Intensity Indicator (CII) Trend (YTD)",
+                xaxis_title="Date",
                 yaxis_title="AER (gCO₂/dwt-nm)",
                 template="plotly_dark",
                 height=500,
+                yaxis=dict(
+                    range=[y_min, y_max]
+                ),
                 legend=dict(
                     orientation="h",
                     yanchor="bottom",
                     y=1.02,
                     xanchor="center",
                     x=0.5
-                )
+                ),
+                annotations=[
+                    dict(
+                        x=dates[-1],
+                        y=required_cii[-1] * 0.975,
+                        xref="x",
+                        yref="y",
+                        text="A",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#4CAF50", size=14)
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=required_cii[-1] * 1.025,
+                        xref="x",
+                        yref="y",
+                        text="B",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#8BC34A", size=14)
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=required_cii[-1] * 1.1,
+                        xref="x",
+                        yref="y",
+                        text="C",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#FFC107", size=14)
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=required_cii[-1] * 1.2,
+                        xref="x",
+                        yref="y",
+                        text="D",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#FF9800", size=14)
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=required_cii[-1] * 1.25,
+                        xref="x",
+                        yref="y",
+                        text="E",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#F44336", size=14)
+                    ),
+                ]
             )
             
-            # Customize x-axis to show month names
+            # Format dates on x-axis
             fig.update_xaxes(
-                tickformat="%b %Y",
-                tickmode="array",
-                tickvals=dates,
-                ticktext=[d.strftime("%b %Y") for d in dates]
+                tickformat="%d %b %Y",
+                tickangle=-45
             )
             
             return fig
@@ -565,7 +606,7 @@ class CIIAgent:
             # Format metrics for report
             cii_metrics = {
                 'rating': latest_cii['cii_rating'],
-                'attained_aer': latest_cii['cumulative_aer'],
+                'attained_aer': latest_cii['attained_aer'],
                 'required_cii': latest_cii['required_cii'],
                 'cumulative_distance': latest_cii['cumulative_distance'],
                 'cumulative_co2': latest_cii['cumulative_co2']
