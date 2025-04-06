@@ -490,6 +490,8 @@ class AdvancedReportGenerator:
             # Open the template document
             try:
                 template_path = "templates/vessel_performance_template.docx"
+                if not os.path.exists(template_path):
+                print(f"Template file not found at: {template_path}")
                 print(f"Attempting to load template from: {template_path}")
                 doc = Document(template_path)
                 print("Template loaded successfully")
