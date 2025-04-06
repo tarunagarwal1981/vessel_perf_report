@@ -114,253 +114,173 @@ class HullPerformanceAgent:
     
     def create_performance_chart(self, data, metric_name, chart_title, y_axis_title):
         """
-        Create a professional hull performance chart with linear trend line
+        Create a professional hull performance chart with linear trend line using Matplotlib
+        Returns both the matplotlib figure and the latest value
         """
         if not data:
             return None, None
         
         import matplotlib.pyplot as plt
-        import seaborn as sns
+        import matplotlib.dates as mdates
         import pandas as pd
         import numpy as np
-        from matplotlib.ticker import MaxNLocator
+        from io import BytesIO
         import plotly.graph_objects as go
         
-        # Prepare data - ensure dates are in datetime format
-        dates = [pd.to_datetime(row['report_date']) for row in data]
-        metric_values = [row.get(metric_name, 0) for row in data]
+        # Prepare data
+        df = pd.DataFrame({
+            'date': [pd.to_datetime(row['report_date']) for row in data],
+            'value': [row.get(metric_name, 0) for row in data]
+        })
         
-        # Sort data for proper trend line
-        sorted_indices = np.argsort(dates)
-        dates_sorted = [dates[i] for i in sorted_indices]
-        metric_values_sorted = [metric_values[i] for i in sorted_indices]
+        # Sort by date
+        df = df.sort_values('date')
         
-        # Create a Plotly figure (maintaining compatibility with existing code)
-        fig = go.Figure()
+        # Create a high-quality matplotlib figure
+        plt.figure(figsize=(12, 8), dpi=100)
         
-        # Add scatter points
-        fig.add_trace(go.Scatter(
-            x=dates,
-            y=metric_values,
-            mode='markers',
-            marker=dict(
-                size=12,
-                color=metric_values,
-                colorscale='Viridis',
-                showscale=True,
-                colorbar=dict(
-                    title=dict(
-                        text="Power Loss (%)",
-                    )
-                )
-            ),
-            name='Performance Data'
-        ))
+        # Set the style
+        plt.style.use('ggplot')
         
-        # Calculate linear trend (explicitly linear as requested)
+        # Create color gradient based on values for scatter points
+        scatter = plt.scatter(df['date'], df['value'], 
+                             s=120,  # Large point size
+                             c=df['value'],  # Color by value
+                             cmap='viridis',  # Professional color map
+                             alpha=0.8,
+                             edgecolors='white',  # White edge for 3D effect
+                             linewidths=2,
+                             zorder=5)  # Ensure points are on top
+        
+        # Add a color bar
+        cbar = plt.colorbar(scatter)
+        cbar.set_label('Excess Power (%)', rotation=270, labelpad=20)
+        
+        # Calculate linear trend
         latest_value = None
-        if len(dates_sorted) > 1:
-            # Convert dates to numeric for fitting
-            x_numeric = np.array([(d - dates_sorted[0]).total_seconds() / 86400 for d in dates_sorted])
-            y = np.array(metric_values_sorted)
+        if len(df) > 1:
+            # Convert dates to ordinal values for regression
+            x_numeric = np.array(mdates.date2num(df['date']))
+            y = df['value'].values
             
             # Calculate linear regression
-            coeffs = np.polyfit(x_numeric, y, 1)
-            slope = coeffs[0]
-            intercept = coeffs[1]
+            slope, intercept = np.polyfit(x_numeric, y, 1)
             
-            # Generate points for the trend line
-            x_line = np.array([0, x_numeric[-1]])
+            # Generate line points
+            x_line = np.array([x_numeric.min(), x_numeric.max()])
             y_line = slope * x_line + intercept
             
-            # Convert back to datetime for plotting
-            x_line_dates = [dates_sorted[0] + pd.Timedelta(days=float(x)) for x in x_line]
+            # Calculate slope in readable terms (percent per day)
+            slope_per_day = slope
             
-            # Add the trend line
-            fig.add_trace(go.Scatter(
-                x=x_line_dates,
-                y=y_line,
-                mode='lines',
-                line=dict(color='#FF0066', width=3),
-                name=f'Trend Line (Slope: {slope:.4f} % per day)',
-                fill='tozeroy',
-                fillcolor='rgba(255, 0, 102, 0.1)'
-            ))
+            # Plot the trend line
+            plt.plot(mdates.num2date(x_line), y_line, 
+                    color='#FF0066',  # Vibrant pink
+                    linestyle='-', 
+                    linewidth=3, 
+                    label=f'Trend Line (Slope: {slope_per_day:.4f}% per day)')
             
             # Save the latest value for reference
             latest_value = y_line[-1]
         
-        # Add thresholds for hull roughness power loss
+        # Add thresholds for hull power loss
         if metric_name == 'hull_roughness_power_loss':
-            # Add good zone (0-15%)
-            fig.add_shape(
-                type="rect",
-                x0=min(dates),
-                x1=max(dates),
-                y0=0,
-                y1=15,
-                fillcolor="rgba(68, 214, 44, 0.15)",
-                line_width=0,
-                name="Good Zone"
-            )
-            
-            # Add average zone (15-25%)
-            fig.add_shape(
-                type="rect",
-                x0=min(dates),
-                x1=max(dates),
-                y0=15,
-                y1=25,
-                fillcolor="rgba(255, 214, 0, 0.15)",
-                line_width=0,
-                name="Average Zone"
-            )
-            
-            # Add poor zone (>25%)
-            fig.add_shape(
-                type="rect",
-                x0=min(dates),
-                x1=max(dates),
-                y0=25,
-                y1=max(metric_values) * 1.2 if metric_values else 40,
-                fillcolor="rgba(255, 0, 0, 0.15)",
-                line_width=0,
-                name="Poor Zone"
-            )
+            # Add colored background zones
+            plt.axhspan(0, 15, color='#4CAF50', alpha=0.15, label='Good Condition')
+            plt.axhspan(15, 25, color='#FFC107', alpha=0.15, label='Average Condition')
+            plt.axhspan(25, max(df['value'].max() * 1.1, 30), color='#F44336', alpha=0.15, label='Poor Condition')
             
             # Add threshold lines
-            fig.add_shape(
-                type="line",
-                x0=min(dates),
-                y0=15,
-                x1=max(dates),
-                y1=15,
-                line=dict(color="rgba(255, 214, 0, 0.8)", width=2, dash="dash"),
-            )
-            
-            fig.add_shape(
-                type="line",
-                x0=min(dates),
-                y0=25,
-                x1=max(dates),
-                y1=25,
-                line=dict(color="rgba(255, 0, 0, 0.8)", width=2, dash="dash"),
-            )
-            
-            # Add threshold annotations
-            fig.add_annotation(
-                x=min(dates),
-                y=15,
-                text="Good/Average Threshold (15%)",
-                showarrow=False,
-                yshift=10,
-                xshift=100,
-                font=dict(color="rgba(255, 214, 0, 0.8)", size=14),
-                bgcolor="rgba(255, 255, 255, 0.7)",
-                bordercolor="rgba(255, 214, 0, 0.8)",
-                borderwidth=1,
-                borderpad=4,
-                align="left"
-            )
-            
-            fig.add_annotation(
-                x=min(dates),
-                y=25,
-                text="Average/Poor Threshold (25%)",
-                showarrow=False,
-                yshift=10,
-                xshift=100,
-                font=dict(color="rgba(255, 0, 0, 0.8)", size=14),
-                bgcolor="rgba(255, 255, 255, 0.7)",
-                bordercolor="rgba(255, 0, 0, 0.8)",
-                borderwidth=1,
-                borderpad=4,
-                align="left"
-            )
+            plt.axhline(y=15, color='#FFC107', linestyle='--', alpha=0.7, linewidth=2, label='Good/Average Threshold (15%)')
+            plt.axhline(y=25, color='#F44336', linestyle='--', alpha=0.7, linewidth=2, label='Average/Poor Threshold (25%)')
         
         # Add latest value annotation
         if latest_value is not None:
-            # Determine color based on value
+            # Determine color and condition based on value
             if metric_name == 'hull_roughness_power_loss':
                 if latest_value < 15:
-                    color = "rgba(68, 214, 44, 1)"  # Green
+                    color = '#4CAF50'  # Green
                     condition = 'GOOD'
                 elif latest_value < 25:
-                    color = "rgba(255, 214, 0, 1)"  # Yellow
+                    color = '#FFC107'  # Amber
                     condition = 'AVERAGE'
                 else:
-                    color = "rgba(255, 0, 0, 1)"    # Red
+                    color = '#F44336'  # Red
                     condition = 'POOR'
             else:
-                color = "rgba(255, 0, 110, 1)"      # Pink
+                color = '#FF0066'  # Pink
                 condition = ''
-                
-            fig.add_annotation(
-                x=max(dates),
-                y=latest_value,
-                text=f"Latest: {latest_value:.2f}%<br>Condition: {condition}",
-                showarrow=True,
-                arrowhead=2,
-                arrowcolor=color,
-                arrowsize=1.5,
-                arrowwidth=2.5,
-                ax=-60,
-                ay=-40,
-                font=dict(color=color, size=16, weight="bold"),
-                bgcolor="rgba(255, 255, 255, 0.9)",
-                bordercolor=color,
-                borderwidth=2,
-                borderpad=4
-            )
+            
+            # Add annotation with arrow pointing to the end of trend line
+            plt.annotate(f'Latest: {latest_value:.2f}%\nCondition: {condition}',
+                        xy=(df['date'].iloc[-1], latest_value),  # End of the trend line
+                        xytext=(40, 0),  # Offset text to right
+                        textcoords='offset points',
+                        arrowprops=dict(arrowstyle='->', lw=2, color=color),
+                        bbox=dict(boxstyle='round,pad=0.5', fc='white', ec=color, alpha=0.9),
+                        fontsize=12,
+                        color=color,
+                        weight='bold',
+                        ha='left',
+                        va='center',
+                        zorder=6)  # Ensure annotation is on top
         
-        # Update layout
+        # Customize the axes
+        plt.xlabel('Date', fontsize=14, fontweight='bold')
+        plt.ylabel(y_axis_title, fontsize=14, fontweight='bold')
+        plt.title(chart_title, fontsize=18, fontweight='bold', pad=20)
+        
+        # Format x-axis dates nicely
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+        plt.gca().xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+        plt.xticks(rotation=45)
+        
+        # Format y-axis
+        plt.ylim(bottom=0)  # Start y-axis at 0
+        
+        # Add gridlines
+        plt.grid(True, linestyle='--', alpha=0.7)
+        
+        # Add a legend
+        plt.legend(loc='upper left', frameon=True, framealpha=0.9, edgecolor='gray')
+        
+        # Tight layout
+        plt.tight_layout()
+        
+        # Create a Plotly figure wrapper for compatibility with the rest of your code
+        # Convert matplotlib figure to image bytes
+        buf = BytesIO()
+        plt.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+        buf.seek(0)
+        
+        # Create a minimal plotly figure that wraps the matplotlib image
+        fig = go.Figure()
+        
+        # Add the image as a layout image
+        fig.add_layout_image(
+            dict(
+                source=f"data:image/png;base64,{BytesIO(buf.read()).getvalue().hex()}",
+                xref="paper",
+                yref="paper",
+                x=0,
+                y=1,
+                sizex=1,
+                sizey=1,
+                sizing="stretch",
+                layer="below"
+            )
+        )
+        
+        # Update layout to match the image dimensions
         fig.update_layout(
-            title={
-                'text': chart_title,
-                'y':0.95,
-                'x':0.5,
-                'xanchor': 'center',
-                'yanchor': 'top'
-            },
-            xaxis_title="Date",
-            yaxis_title=y_axis_title,
-            paper_bgcolor='rgb(255, 255, 255)',
-            plot_bgcolor='rgb(245, 245, 245)',
-            height=700,
-            margin=dict(l=50, r=50, t=80, b=50),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="center",
-                x=0.5,
-                bgcolor="rgba(255, 255, 255, 0.7)",
-                bordercolor="#666666",
-                borderwidth=1
-            )
+            autosize=True,
+            width=1200,
+            height=800,
+            margin=dict(l=0, r=0, b=0, t=0)
         )
         
-        # Update axes
-        fig.update_xaxes(
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='rgba(211, 211, 211, 0.5)',
-            zeroline=False,
-            showline=True,
-            linewidth=2,
-            linecolor='#333333',
-            tickangle=-30
-        )
-        
-        fig.update_yaxes(
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='rgba(211, 211, 211, 0.5)',
-            zeroline=False,
-            showline=True,
-            linewidth=2,
-            linecolor='#333333'
-        )
+        # Close the matplotlib figure to free memory
+        plt.close()
         
         return fig, latest_value
     
