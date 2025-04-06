@@ -416,31 +416,43 @@ class AdvancedReportGenerator:
             return f"Hull condition contributes approximately {impact_aer:.2f} gCO₂/dwt-nm ({impact_percent:.1f}%) to the current AER."
     
     def _save_chart_as_image(self, fig):
+        """Save a chart as an image file and return the path"""
         if fig is None:
             return None
         
         try:
-            # Create a deep copy to avoid modifying the original
-            fig_copy = copy.deepcopy(fig)
-            
-            # Update layout for better image output
-            fig_copy.update_layout(
-                template="plotly_white",  # Better for print
-                height=600,
-                width=1000,  # Increased width for better aspect ratio
-                margin=dict(l=40, r=40, t=50, b=40),
-                font=dict(color='black', size=14)
-            )
+            import matplotlib.pyplot as plt
             
             # Create temporary file
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp:
-                # Use higher scale for better resolution
-                fig_copy.write_image(temp.name, scale=3)
+                # Save with high quality for good appearance in Word
+                if hasattr(fig, 'savefig'):  # Matplotlib figure
+                    fig.savefig(temp.name, format='png', dpi=300, bbox_inches='tight')
+                    plt.close(fig)  # Close the figure to free memory
+                elif hasattr(fig, 'write_image'):  # Plotly figure
+                    fig.write_image(temp.name, scale=3)
+                else:
+                    # Unknown figure type
+                    print("Unknown figure type, cannot save as image")
+                    return None
+                    
                 return temp.name
         except Exception as e:
             print(f"Error saving chart image: {str(e)}")
             traceback.print_exc()
-            return None
+            
+            # Try with lower quality as a fallback
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp:
+                    if hasattr(fig, 'savefig'):  # Matplotlib figure
+                        fig.savefig(temp.name, dpi=150, bbox_inches='tight')
+                        plt.close(fig)
+                    elif hasattr(fig, 'write_image'):  # Plotly figure
+                        fig.write_image(temp.name, scale=1)
+                    return temp.name
+            except Exception as inner_e:
+                print(f"Error in fallback chart rendering: {str(inner_e)}")
+                return None
     
     def _replace_text_in_document(self, doc, replacements):
         """Replace text in all parts of the document including headers/footers"""
@@ -494,12 +506,6 @@ class AdvancedReportGenerator:
     def _replace_chart_in_document(self, doc, placeholder, chart, width_inches=None):
         """
         Replace a placeholder in the document with a chart image
-        
-        Parameters:
-        - doc: The Document object
-        - placeholder: The text placeholder to replace
-        - chart: The plotly chart object
-        - width_inches: Optional width in inches (defaults to 6.0 for most charts or 7.5 for full width)
         """
         # Save chart as image
         chart_path = self._save_chart_as_image(chart)
@@ -520,7 +526,31 @@ class AdvancedReportGenerator:
                     paragraph.text = ""
                     # Add picture
                     run = paragraph.add_run()
-                    run.add_picture(chart_path, width=Inches(width_inches))
+                    picture = run.add_picture(chart_path, width=Inches(width_inches))
+                    
+                    # Center the paragraph to center the image
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    
+                    # Add caption in a new paragraph
+                    if width_inches >= 6.0:
+                        caption_text = ""
+                        if "HULL_PERFORMANCE" in placeholder:
+                            caption_text = "Figure 1: Hull Performance Trend Analysis showing power loss over time"
+                        elif "CII_CHART" in placeholder:
+                            caption_text = "Figure 2: Carbon Intensity Indicator (CII) Rating Trend Analysis"
+                        elif "BALLAST_CHART" in placeholder:
+                            caption_text = "Figure 3a: Speed-Consumption Analysis in Ballast Condition"
+                        elif "LADEN_CHART" in placeholder:
+                            caption_text = "Figure 3b: Speed-Consumption Analysis in Laden Condition"
+                        
+                        if caption_text:
+                            # Add a caption under the image
+                            caption_paragraph = paragraph._element.addnext(doc.paragraphs[0]._element.__class__())
+                            caption_paragraph = Paragraph(caption_paragraph, paragraph._parent)
+                            caption_paragraph.text = caption_text
+                            caption_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            caption_paragraph.runs[0].italic = True
+                            
                     replaced = True
                     break
             
@@ -535,19 +565,25 @@ class AdvancedReportGenerator:
                                     paragraph.text = ""
                                     # Add picture
                                     run = paragraph.add_run()
-                                    # For tables, use a smaller width or adjust based on table cell
+                                    
+                                    # For tables, adjust size based on content
                                     cell_width = width_inches
                                     if cell_width > 3.5:  # Limit image width in table cells
                                         cell_width = 3.5
+                                    
                                     run.add_picture(chart_path, width=Inches(cell_width))
+                                    
+                                    # Center the paragraph to center the image
+                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    
                                     replaced = True
+                                    break
+                                if replaced:
                                     break
                             if replaced:
                                 break
                         if replaced:
                             break
-                    if replaced:
-                        break
             
             # Clean up
             try:
