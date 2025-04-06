@@ -487,345 +487,38 @@ class AdvancedReportGenerator:
     
     def _generate_formatted_report(self, vessel_name, report_date, analyst_name, hull_metrics, speed_metrics, options, vessel_data):
         try:
-            # Create a new document
-            doc = Document()
+            # Open the template document
+            template_path = "templates/vessel_performance_template.docx"
+            doc = Document(template_path)
             
-            # Add title and vessel info
-            doc.add_heading('Vessel Performance Summary', 0)
+            # Replace text placeholders throughout the document
+            self._replace_text_in_document(doc, {
+                '{{VESSEL_NAME}}': vessel_name.upper(),
+                '{{REPORT_DATE}}': report_date.strftime('%B %Y'),
+                '{{HULL_CONDITION}}': hull_metrics['condition'],
+                '{{HULL_SAVINGS}}': f"{hull_metrics['fuel_savings']:.1f} MT/D",
+                '{{POWER_CONSUMPTION}}': f"{hull_metrics['power_loss']:.1f} %",
+                '{{HULL_RECOMMENDATION}}': hull_metrics['recommendation'],
+                # Add all other text replacements from our mapping
+            })
             
-            # Add horizontal line
-            doc.add_paragraph('_' * 80)
+            # Generate and replace charts
+            hull_chart = self._create_hull_performance_chart(vessel_data)
+            if hull_chart:
+                self._replace_chart_in_document(doc, '{{HULL_PERFORMANCE_CHART}}', hull_chart)
+                
+            # Generate and replace speed consumption charts
+            ballast_chart, laden_chart = self._create_speed_consumption_charts(vessel_data)
+            if ballast_chart:
+                self._replace_chart_in_document(doc, '{{BALLAST_CHART}}', ballast_chart)
+            if laden_chart:
+                self._replace_chart_in_document(doc, '{{LADEN_CHART}}', laden_chart)
             
-            # Add vessel information
-            p = doc.add_paragraph()
-            p.add_run('Vessel Name: ').bold = True
-            p.add_run(vessel_name.upper())
-            
-            p = doc.add_paragraph()
-            p.add_run('Prepared In: ').bold = True
-            p.add_run(str(report_date.strftime('%B %Y')))
-            
-            # Create the main comparison table (3x6)
-            table = doc.add_table(rows=3, cols=6)
-            table.style = 'Table Grid'
-            
-            # Set column widths
-            for i, width in enumerate([1.5, 1.0, 1.5, 1.0, 1.5, 1.0]):
-                table.columns[i].width = Inches(width)
-            
-            # Header row
-            header_cells = table.rows[0].cells
-            header_cells[0].text = "Hull & Propeller"
-            header_cells[1].text = hull_metrics['condition']
-            header_cells[2].text = "Machinery"
-            header_cells[3].text = "Good"
-            header_cells[4].text = "Emissions"
-            header_cells[5].text = "CII Rating - A"
-            
-            # Apply bold formatting to headers
-            for cell in header_cells:
-                for paragraph in cell.paragraphs:
-                    for run in paragraph.runs:
-                        run.bold = True
-            
-            # Icons row - if using advanced template
-            if options['template_option'] == "Advanced Template (With Icons)":
-                try:
-                    # Add placeholder for icons - in real implementation, add actual images
-                    icon_cells = table.rows[1].cells
-                    icon_cells[0].text = "[Hull Icon]"
-                    icon_cells[2].text = "[Machinery Icon]"
-                    icon_cells[4].text = "[Emissions Icon]"
-                except Exception as e:
-                    print(f"Error adding icons: {str(e)}")
-            
-            # Values row
-            value_cells = table.rows[2 if options['template_option'] == "Advanced Template (With Icons)" else 1].cells
-            value_cells[1].text = f"Potential Savings\n{hull_metrics['fuel_savings']:.1f} MT/D"
-            value_cells[3].text = "Potential Savings\n-"
-            value_cells[5].text = "Potential Improvement\n-"
-            
-            doc.add_paragraph()
-            
-            # Create detailed metrics table
-            if options['include_hull']:
-                doc.add_heading('Hull & Propeller Performance', 1)
-                hull_table = doc.add_table(rows=5, cols=2)
-                hull_table.style = 'Table Grid'
-                
-                rows = hull_table.rows
-                rows[0].cells[0].text = 'Additional Power Consumption'
-                rows[0].cells[1].text = f"{hull_metrics['power_loss']:.1f} %"
-                
-                rows[1].cells[0].text = 'Potential Fuel Savings from Hull Cleaning & Propeller Polishing'
-                rows[1].cells[1].text = f"{hull_metrics['fuel_savings']:.1f} MT/D"
-                
-                rows[2].cells[0].text = 'Hull & Propeller Condition'
-                rows[2].cells[1].text = hull_metrics['condition']
-                
-                rows[3].cells[0].text = 'Recommendation'
-                rows[3].cells[1].text = hull_metrics['recommendation']
-                
-                rows[4].cells[0].text = 'Forecasted Date of Hull cleaning'
-                rows[4].cells[1].text = '-'
-                
-                doc.add_paragraph()
-                
-                # Hull Performance Analysis section
-                doc.add_heading('Hull & Propeller Performance Analysis', 1)
-                
-                # Generate and add hull performance chart
-                hull_chart = self._create_hull_performance_chart(vessel_data)
-                
-                # Only try to save and add the chart if charts are enabled in template
-                if hull_chart and options['template_option'] == "Advanced Template (With Icons)":
-                    try:
-                        chart_path = self._save_chart_as_image(hull_chart)
-                        if chart_path:
-                            doc.add_picture(chart_path, width=Inches(6.0))
-                            try:
-                                os.unlink(chart_path)  # Clean up the temporary file
-                            except:
-                                pass
-                    except Exception as e:
-                        print(f"Error adding hull chart to document: {str(e)}")
-                        doc.add_paragraph("[Hull performance chart would appear here]")
-                else:
-                    doc.add_paragraph("[Hull performance chart would appear here]")
-                
-                doc.add_paragraph()
-                
-                # Add notes
-                doc.add_heading('Notes:', 3)
-                
-                note1 = doc.add_paragraph()
-                note1.add_run('- ').bold = True
-                note1.add_run("The vessel tends to operate with a gradual change in added resistance over time.")
-                
-                note2 = doc.add_paragraph()
-                note2.add_run('- ').bold = True
-                note2.add_run("Regular monitoring helps optimize hull cleaning intervals.")
-                
-                doc.add_paragraph()
-            
-            # Speed Consumption Profile
-            if options['include_speed']:
-                doc.add_heading('Speed Consumption Profile', 1)
-                
-                # Add speed consumption charts
-                ballast_chart, laden_chart = self._create_speed_consumption_charts(vessel_data)
-                
-                if options['template_option'] == "Advanced Template (With Icons)" and (ballast_chart or laden_chart):
-                    # Create a table for the charts
-                    chart_table = doc.add_table(rows=1, cols=2)
-                    chart_table.style = 'Table Grid'
-                    
-                    # Left column - Ballast condition
-                    if ballast_chart:
-                        try:
-                            ballast_chart_path = self._save_chart_as_image(ballast_chart)
-                            if ballast_chart_path:
-                                chart_table.cell(0, 0).paragraphs[0].add_run("Ballast Condition").bold = True
-                                chart_table.cell(0, 0).add_paragraph().add_run().add_picture(
-                                    ballast_chart_path, width=Inches(3.0)
-                                )
-                                try:
-                                    os.unlink(ballast_chart_path)
-                                except:
-                                    pass
-                        except Exception as e:
-                            print(f"Error adding ballast chart: {str(e)}")
-                            chart_table.cell(0, 0).add_paragraph("[Ballast condition chart]")
-                    else:
-                        chart_table.cell(0, 0).add_paragraph("[No ballast data available]")
-                    
-                    # Right column - Laden condition
-                    if laden_chart:
-                        try:
-                            laden_chart_path = self._save_chart_as_image(laden_chart)
-                            if laden_chart_path:
-                                chart_table.cell(0, 1).paragraphs[0].add_run("Laden Condition").bold = True
-                                chart_table.cell(0, 1).add_paragraph().add_run().add_picture(
-                                    laden_chart_path, width=Inches(3.0)
-                                )
-                                try:
-                                    os.unlink(laden_chart_path)
-                                except:
-                                    pass
-                        except Exception as e:
-                            print(f"Error adding laden chart: {str(e)}")
-                            chart_table.cell(0, 1).add_paragraph("[Laden condition chart]")
-                    else:
-                        chart_table.cell(0, 1).add_paragraph("[No laden data available]")
-                else:
-                    doc.add_paragraph("[Speed consumption charts would appear here]")
-                
-                doc.add_paragraph()
-                
-                # Add notes
-                doc.add_heading('Notes:', 3)
-                
-                note1 = doc.add_paragraph()
-                note1.add_run('- ').bold = True
-                
-                if speed_metrics['ballast_avg'] > 0:
-                    note1.add_run(f"In ballast condition, the vessel shows an average fuel consumption of {speed_metrics['ballast_avg']:.1f} MT/day.")
-                else:
-                    note1.add_run("Insufficient data to analyze ballast condition performance.")
-                
-                note2 = doc.add_paragraph()
-                note2.add_run('- ').bold = True
-                
-                if speed_metrics['laden_avg'] > 0:
-                    note2.add_run(f"In laden condition, the vessel shows an average fuel consumption of {speed_metrics['laden_avg']:.1f} MT/day.")
-                else:
-                    note2.add_run("Insufficient data to analyze laden condition performance.")
-                
-                doc.add_paragraph()
-            
-            # Emissions section (placeholder)
-            if options['include_emissions']:
-                doc.add_heading('Emissions Profile', 1)
-                doc.add_paragraph()
-                
-                p = doc.add_paragraph()
-                p.add_run('CII Rating:').bold = True
-                p.add_run('\n\nCII rating for 2024 of the vessel is "A" (exclusions not included). CII rating for 2024 is provisional, as it is subject to further verification and adjustments based on exclusion data.')
-                
-                doc.add_paragraph("[Emissions chart would appear here]")
-                doc.add_paragraph()
-            
-            # Machinery section (placeholder)
-            if options['include_machinery']:
-                doc.add_heading('Main Engine Performance', 1)
-                machinery_table = doc.add_table(rows=3, cols=2)
-                machinery_table.style = 'Table Grid'
-                
-                rows = machinery_table.rows
-                rows[0].cells[0].text = 'Average ME SFOC'
-                rows[0].cells[1].text = "167.12 g/KWhr at 81% Load (Placeholder)"
-                
-                rows[1].cells[0].text = 'ME Recommendation'
-                rows[1].cells[1].text = "ME Performance is within Acceptable Range"
-                
-                rows[2].cells[0].text = 'Potential Fuel Saving from ME'
-                rows[2].cells[1].text = "-"
-                
-                doc.add_paragraph()
-                
-                doc.add_heading('Auxiliaries Performance', 2)
-                aux_table = doc.add_table(rows=2, cols=2)
-                aux_table.style = 'Table Grid'
-                
-                rows = aux_table.rows
-                rows[0].cells[0].text = 'Excess Boiler Consumption (last 6 month)'
-                rows[0].cells[1].text = "16.7 MT (Placeholder)"
-                
-                rows[1].cells[0].text = 'Redundant AE Hours (last 6 month)'
-                rows[1].cells[1].text = "-"
-                
-                doc.add_paragraph()
-            
-            # Appendix
-            # Appendix
-            doc.add_heading('Appendix', 1)
-            doc.add_heading('General Conditions', 2)
-            
-            appendix = doc.add_paragraph()
-            appendix.add_run('- ').bold = True
-            appendix.add_run("Analysis Period is Last Six Months or the after the Last Event which ever is later")
-            
-            appendix2 = doc.add_paragraph()
-            appendix2.add_run('- ').bold = True
-            appendix2.add_run("Days with Good Weather (BF<=4) are considered for analysis.")
-            
-            appendix3 = doc.add_paragraph()
-            appendix3.add_run('- ').bold = True
-            appendix3.add_run("Days with Steaming hrs greater than 17 considered for analysis.")
-            
-            appendix4 = doc.add_paragraph()
-            appendix4.add_run('- ').bold = True
-            appendix4.add_run("Data is compared with Original Sea Trial")
-            
-            # Hull Performance rating criteria
-            doc.add_heading('Hull Performance', 2)
-            hull_app1 = doc.add_paragraph()
-            hull_app1.add_run('- ').bold = True
-            hull_app1.add_run("Excess Power < 15 % -- Rating Good")
-            
-            hull_app2 = doc.add_paragraph()
-            hull_app2.add_run('- ').bold = True
-            hull_app2.add_run("15 < Excess Power < 25 % -- Rating Average")
-            
-            hull_app3 = doc.add_paragraph()
-            hull_app3.add_run('- ').bold = True
-            hull_app3.add_run("Excess Power > 25 % -- Rating Poor")
-            
-            # Machinery Performance rating criteria (if included)
-            if options['include_machinery']:
-                doc.add_heading('Machinery Performance', 2)
-                mach_app1 = doc.add_paragraph()
-                mach_app1.add_run('- ').bold = True
-                mach_app1.add_run("SFOC(Grms/kW.hr) within +/- 10 from Shop test condition are considered as \"Good\"")
-                
-                mach_app2 = doc.add_paragraph()
-                mach_app2.add_run('- ').bold = True
-                mach_app2.add_run("SFOC(Grms/kW.hr) Greater than 10 and less than 20 are considered as \"Average\"")
-                
-                mach_app3 = doc.add_paragraph()
-                mach_app3.add_run('- ').bold = True
-                mach_app3.add_run("SFOC(Grms/kW.hr) Above 20 are considered as \"Poor\"")
-            
-            # Auxiliaries performance criteria (if included)
-            if options['include_machinery']:
-                doc.add_heading('Auxiliaries Performance', 2)
-                aux_app = doc.add_paragraph()
-                aux_app.add_run('- ').bold = True
-                aux_app.add_run("Excess boiler consumption refers to the amount of fuel oil used by the boiler during the Noon at Sea. Any consideration to operational requirements not given, due to the lack of evidence of such requirement in Noon Reports.")
-            
-            # Speed consumption criteria (if included)
-            if options['include_speed']:
-                doc.add_heading('Speed Consumption Performance', 2)
-                speed_app = doc.add_paragraph()
-                speed_app.add_run('- ').bold = True
-                speed_app.add_run("Analysis carried out using regression techniques.")
-            
-            # Convert the document to bytes
+            # Save to memory
             docx_file = BytesIO()
             doc.save(docx_file)
             docx_file.seek(0)
             
             return docx_file.getvalue()
         except Exception as e:
-            # Log the full error
-            print(f"Error generating report: {str(e)}")
-            print(traceback.format_exc())
-            
-            # Create a simple error report
-            error_doc = Document()
-            error_doc.add_heading('ERROR: Report Generation Failed', 0)
-            error_doc.add_paragraph(f"Vessel Name: {vessel_name}")
-            error_doc.add_paragraph(f"Date: {report_date}")
-            
-            error_doc.add_heading('Error Details', 1)
-            error_doc.add_paragraph(f"An error occurred during report generation: {str(e)}")
-            
-            error_doc.add_heading('Basic Report Content (No Formatting)', 1)
-            
-            # Add basic content without fancy formatting
-            error_doc.add_paragraph(f"Hull Condition: {hull_metrics['condition']}")
-            error_doc.add_paragraph(f"Power Loss: {hull_metrics['power_loss']:.1f}%")
-            error_doc.add_paragraph(f"Potential Savings: {hull_metrics['fuel_savings']:.1f} MT/D")
-            
-            if speed_metrics['ballast_avg'] > 0:
-                error_doc.add_paragraph(f"Ballast Consumption: {speed_metrics['ballast_avg']:.1f} MT/day")
-            
-            if speed_metrics['laden_avg'] > 0:
-                error_doc.add_paragraph(f"Laden Consumption: {speed_metrics['laden_avg']:.1f} MT/day")
-            
-            # Save the error document
-            error_file = BytesIO()
-            error_doc.save(error_file)
-            error_file.seek(0)
-            
-            return error_file.getvalue()
+            # Error handling code...
