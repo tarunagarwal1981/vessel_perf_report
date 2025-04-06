@@ -108,6 +108,15 @@ class AdvancedReportGenerator:
                     index=1
                 )
                 
+                # Debug - Upload template option
+                st.subheader("Template Upload (Optional)")
+                uploaded_template = st.file_uploader("Upload report template", type="docx")
+                if uploaded_template is not None:
+                    # Save the uploaded template
+                    with open("uploaded_template.docx", "wb") as f:
+                        f.write(uploaded_template.getbuffer())
+                    st.success("Template uploaded successfully")
+                
                 # Generate report button
                 if st.button("Generate Report"):
                     try:
@@ -138,7 +147,8 @@ class AdvancedReportGenerator:
                                     'include_machinery': include_machinery,
                                     'template_option': template_option
                                 },
-                                vessel_data=vessel_data
+                                vessel_data=vessel_data,
+                                uploaded_template=uploaded_template is not None
                             )
                             
                             # Create download button
@@ -485,61 +495,247 @@ class AdvancedReportGenerator:
             print(f"Error saving chart image: {str(e)}")
             return None
     
-    def _generate_formatted_report(self, vessel_name, report_date, analyst_name, hull_metrics, speed_metrics, options, vessel_data):
+    # New method for replacing text in document
+    def _replace_text_in_document(self, doc, replacements):
+        # Replace in paragraphs
+        for paragraph in doc.paragraphs:
+            for key, value in replacements.items():
+                if key in paragraph.text:
+                    paragraph.text = paragraph.text.replace(key, value)
+        
+        # Replace in tables
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for key, value in replacements.items():
+                            if key in paragraph.text:
+                                paragraph.text = paragraph.text.replace(key, value)
+    
+    # New method for replacing charts in document
+    def _replace_chart_in_document(self, doc, placeholder, chart):
+        # Save chart as image
+        chart_path = self._save_chart_as_image(chart)
+        if not chart_path:
+            return False
+        
+        # Find and replace the placeholder with the image
+        replaced = False
         try:
-            # Open the template document
+            # Try to replace in paragraphs
+            for paragraph in doc.paragraphs:
+                if placeholder in paragraph.text:
+                    # Clear paragraph text
+                    paragraph.text = ""
+                    # Add picture
+                    run = paragraph.add_run()
+                    run.add_picture(chart_path, width=Inches(6.0))
+                    replaced = True
+                    break
+            
+            # If not found in paragraphs, try tables
+            if not replaced:
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for paragraph in cell.paragraphs:
+                                if placeholder in paragraph.text:
+                                    # Clear paragraph text
+                                    paragraph.text = ""
+                                    # Add picture
+                                    run = paragraph.add_run()
+                                    run.add_picture(chart_path, width=Inches(3.0))
+                                    replaced = True
+                                    break
+                            if replaced:
+                                break
+                        if replaced:
+                            break
+                    if replaced:
+                        break
+            
+            # Clean up
             try:
+                os.unlink(chart_path)
+            except:
+                pass
+            
+            return replaced
+        except Exception as e:
+            print(f"Error replacing chart: {str(e)}")
+            return False
+    
+    def _generate_formatted_report(self, vessel_name, report_date, analyst_name, hull_metrics, speed_metrics, options, vessel_data, uploaded_template=False):
+        try:
+            # Add debug expander
+            debug_expander = st.expander("Report Generation Debug")
+            with debug_expander:
+                st.write("Starting report generation...")
+                st.write(f"Vessel name: {vessel_name}")
+                st.write(f"Report date: {report_date}")
+            
+            # Determine template path
+            if uploaded_template:
+                template_path = "uploaded_template.docx"
+            else:
                 template_path = "templates/vessel_performance_template.docx"
-                if not os.path.exists(template_path):
-                    st.write(f"Template file not found at: {template_path}")
-                    st.write(f"Attempting to load template from: {template_path}")
-                doc = Document(template_path)
-                print("Template loaded successfully")
-            except Exception as e:
-                print(f"Error loading template: {str(e)}")
-                # Fallback to creating a simple document
             
-            # Replace text placeholders throughout the document
-            self._replace_text_in_document(doc, {
-                '{{VESSEL_NAME}}': vessel_name.upper(),
-                '{{REPORT_DATE}}': report_date.strftime('%B %Y'),
-                '{{HULL_CONDITION}}': hull_metrics['condition'],
-                '{{HULL_SAVINGS}}': f"{hull_metrics['fuel_savings']:.1f} MT/D",
-                '{{POWER_CONSUMPTION}}': f"{hull_metrics['power_loss']:.1f} %",
-                '{{HULL_RECOMMENDATION}}': hull_metrics['recommendation'],
-                # Add all other text replacements from our mapping
-            })
-            
-            # Generate and replace charts
-            hull_chart = self._create_hull_performance_chart(vessel_data)
-            if hull_chart:
-                self._replace_chart_in_document(doc, '{{HULL_PERFORMANCE_CHART}}', hull_chart)
+            with debug_expander:
+                st.write(f"Template path: {template_path}")
+                st.write(f"Template exists: {os.path.exists(template_path)}")
+                st.write(f"Current directory: {os.getcwd()}")
                 
-            # Generate and replace speed consumption charts
-            ballast_chart, laden_chart = self._create_speed_consumption_charts(vessel_data)
-            if ballast_chart:
-                self._replace_chart_in_document(doc, '{{BALLAST_CHART}}', ballast_chart)
-            if laden_chart:
-                self._replace_chart_in_document(doc, '{{LADEN_CHART}}', laden_chart)
+                try:
+                    st.write(f"Files in current directory: {os.listdir()}")
+                    if os.path.exists('templates'):
+                        st.write(f"Files in templates directory: {os.listdir('templates')}")
+                    else:
+                        st.write("'templates' directory does not exist")
+                except Exception as dir_error:
+                    st.error(f"Error listing directory: {str(dir_error)}")
+            
+            # Try to open template or fallback
+            try:
+                if os.path.exists(template_path):
+                    doc = Document(template_path)
+                    with debug_expander:
+                        st.write("✅ Template loaded successfully")
+                else:
+                    with debug_expander:
+                        st.warning("Template not found, creating basic document instead")
+                    # Create a basic document
+                    doc = Document()
+                    doc.add_heading('Vessel Performance Report', 0)
+                    doc.add_paragraph(f"Vessel Name: {vessel_name}")
+                    doc.add_paragraph(f"Date: {report_date}")
+                    doc.add_paragraph(f"Hull Condition: {hull_metrics['condition']}")
+                    doc.add_paragraph(f"Power Loss: {hull_metrics['power_loss']:.1f}%")
+                    doc.add_paragraph(f"Potential Savings: {hull_metrics['fuel_savings']:.1f} MT/D")
+            except Exception as e:
+                with debug_expander:
+                    st.error(f"Error opening template: {str(e)}")
+                # Create a very basic document as fallback
+                doc = Document()
+                doc.add_heading('ERROR: Template Could Not Be Loaded', 0)
+                doc.add_paragraph(f"Error: {str(e)}")
+                doc.add_paragraph(f"Vessel Name: {vessel_name}")
+                doc.add_paragraph(f"Date: {report_date}")
+            
+            # Try to replace placeholders
+            try:
+                with debug_expander:
+                    st.write("Replacing text placeholders...")
+                
+                replacements = {
+                    '{{VESSEL_NAME}}': vessel_name.upper(),
+                    '{{REPORT_DATE}}': report_date.strftime('%B %Y'),
+                    '{{HULL_CONDITION}}': hull_metrics['condition'],
+                    '{{HULL_SAVINGS}}': f"{hull_metrics['fuel_savings']:.1f} MT/D",
+                    '{{POWER_CONSUMPTION}}': f"{hull_metrics['power_loss']:.1f} %",
+                    '{{HULL_RECOMMENDATION}}': hull_metrics['recommendation'],
+                    '{{HULL_CONDITION_DETAIL}}': hull_metrics['condition'],
+                    '{{FUEL_SAVINGS}}': f"{hull_metrics['fuel_savings']:.1f} MT/D",
+                    '{{HULL_CLEANING_DATE}}': "-",
+                    '{{BALLAST_AVG}}': f"{speed_metrics['ballast_avg']:.1f}",
+                    '{{LADEN_AVG}}': f"{speed_metrics['laden_avg']:.1f}",
+                    '{{CII_RATING}}': "A",
+                    '{{CII_RATING_DETAIL}}': "A (AER: 2.9)",
+                    '{{EMISSIONS_IMPROVEMENT}}': "-",
+                    '{{HULL_IMPACT_ON_AER}}': "-",
+                    '{{ME_SFOC}}': "167.12 g/KWhr at 81% Load (Placeholder)",
+                    '{{ME_RECOMMENDATION}}': "ME Performance is within Acceptable Range",
+                    '{{ME_FUEL_SAVING}}': "-",
+                    '{{BOILER_CONSUMPTION}}': "16.7 MT",
+                    '{{REDUNDANT_AE_HOURS}}': "-",
+                    '{{HULL_NOTES}}': "The vessel tends to operate with a gradual change in added resistance over time.",
+                    '{{SPEED_CONSUMPTION_NOTES}}': "In laden and ballast conditions, consumption remains relatively consistent."
+                }
+                
+                self._replace_text_in_document(doc, replacements)
+                with debug_expander:
+                    st.write("✅ Text placeholders replaced")
+            except Exception as e:
+                with debug_expander:
+                    st.error(f"Error replacing text: {str(e)}")
+            
+            # Try to replace charts
+            try:
+                with debug_expander:
+                    st.write("Generating and replacing charts...")
+                
+                # Generate hull performance chart
+                hull_chart = self._create_hull_performance_chart(vessel_data)
+                if hull_chart:
+                    success = self._replace_chart_in_document(doc, '{{HULL_PERFORMANCE_CHART}}', hull_chart)
+                    with debug_expander:
+                        if success:
+                            st.write("✅ Hull performance chart replaced")
+                        else:
+                            st.warning("⚠️ Hull performance chart placeholder not found")
+                
+                # Generate and replace speed consumption charts
+                ballast_chart, laden_chart = self._create_speed_consumption_charts(vessel_data)
+                if ballast_chart:
+                    success = self._replace_chart_in_document(doc, '{{BALLAST_CHART}}', ballast_chart)
+                    with debug_expander:
+                        if success:
+                            st.write("✅ Ballast chart replaced")
+                        else:
+                            st.warning("⚠️ Ballast chart placeholder not found")
+                
+                if laden_chart:
+                    success = self._replace_chart_in_document(doc, '{{LADEN_CHART}}', laden_chart)
+                    with debug_expander:
+                        if success:
+                            st.write("✅ Laden chart replaced")
+                        else:
+                            st.warning("⚠️ Laden chart placeholder not found")
+            except Exception as e:
+                with debug_expander:
+                    st.error(f"Error replacing charts: {str(e)}")
             
             # Save to memory
+            with debug_expander:
+                st.write("Saving document...")
+            
             docx_file = BytesIO()
             doc.save(docx_file)
             docx_file.seek(0)
             
+            with debug_expander:
+                st.write("✅ Document saved successfully")
+            
             return docx_file.getvalue()
         except Exception as e:
             # Log the error
-            print(f"Error generating report: {str(e)}")
-            print(traceback.format_exc())
+            st.error(f"Error generating report: {str(e)}")
+            st.code(traceback.format_exc())
             
             # Create a simple error report
             error_doc = Document()
             error_doc.add_heading('ERROR: Report Generation Failed', 0)
-            # Add more error handling code as needed
+            error_doc.add_paragraph(f"Vessel Name: {vessel_name}")
+            error_doc.add_paragraph(f"Date: {report_date}")
             
-            # Return the error document
+            error_doc.add_heading('Error Details', 1)
+            error_doc.add_paragraph(f"An error occurred during report generation: {str(e)}")
+            
+            error_doc.add_heading('Basic Report Content (No Formatting)', 1)
+            
+            # Add basic content without fancy formatting
+            error_doc.add_paragraph(f"Hull Condition: {hull_metrics['condition']}")
+            error_doc.add_paragraph(f"Power Loss: {hull_metrics['power_loss']:.1f}%")
+            error_doc.add_paragraph(f"Potential Savings: {hull_metrics['fuel_savings']:.1f} MT/D")
+            
+            if speed_metrics['ballast_avg'] > 0:
+                error_doc.add_paragraph(f"Ballast Consumption: {speed_metrics['ballast_avg']:.1f} MT/day")
+            
+            if speed_metrics['laden_avg'] > 0:
+                error_doc.add_paragraph(f"Laden Consumption: {speed_metrics['laden_avg']:.1f} MT/day")
+            
+            # Save the error document
             error_file = BytesIO()
             error_doc.save(error_file)
             error_file.seek(0)
+            
             return error_file.getvalue()
