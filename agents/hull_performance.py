@@ -139,9 +139,11 @@ class HullPerformanceAgent:
                 colorscale='Turbo',   # More vibrant colorscale
                 showscale=True,
                 colorbar=dict(
-                    title="Power Loss (%)",
-                    titleside="right",
-                    titlefont=dict(size=14)
+                    title=dict(
+                        text="Power Loss (%)",
+                        font=dict(size=14)
+                    ),
+                    # No titleside property - it's not supported
                 ),
                 line=dict(width=2, color='rgba(255, 255, 255, 0.8)'),  # Add white border for 3D effect
                 symbol='circle',
