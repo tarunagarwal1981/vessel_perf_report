@@ -442,117 +442,233 @@ class CIIAgent:
     
     def _create_cii_trend_chart(self, cii_data):
         """
-        Create a publication-quality CII trend chart with clear rating zones
-        using pure Matplotlib for maximum compatibility
+        Create CII trend chart showing YTD trend of AER values as an area chart with color-coded rating zones
         """
         try:
             if not cii_data or not cii_data.get('cii_metrics'):
                 return None
                 
-            import matplotlib.pyplot as plt
-            import matplotlib.dates as mdates
-            import pandas as pd
-            import numpy as np
-            
             # Extract metrics for plotting
             metrics = cii_data['cii_metrics']
             
-            # Create DataFrame
-            df = pd.DataFrame(metrics)
+            # Make sure metrics are sorted by date
+            metrics.sort(key=lambda x: x['date'])
             
-            # Sort by date
-            df = df.sort_values('date')
+            # Extract data for plotting
+            dates = [metric['date'] for metric in metrics]
+            attained_aer = [metric['attained_aer'] for metric in metrics]
+            required_cii = [metric['required_cii'] for metric in metrics]
             
-            # Extract key data
-            dates = df['date']
-            attained_aer = df['attained_aer']
-            required_cii = df['required_cii']
+            # Handle y-axis scaling
+            # Calculate the rating boundaries
+            a_boundary = [r * 0.95 for r in required_cii]
+            c_boundary = [r * 1.05 for r in required_cii]
+            d_boundary = [r * 1.15 for r in required_cii]
             
-            # Calculate rating boundaries
-            a_boundary = df['required_cii'] * 0.95
-            c_boundary = df['required_cii'] * 1.05
-            d_boundary = df['required_cii'] * 1.15
+            # Calculate a reasonable y-axis maximum value
+            # Use the maximum of required CII * 1.5 or attained AER (capped at 3 times the required CII)
+            capped_attained_aer = [min(aer, r * 3) for aer, r in zip(attained_aer, required_cii)]
+            y_max = max([max(capped_attained_aer), max(required_cii) * 1.5])
             
-            # Calculate reasonable y-axis limits
+            # Create a list of y_max values with the same length as dates
+            y_max_values = [y_max] * len(dates)
+            
+            # Calculate a reasonable minimum y-axis value
             y_min = max(0, min(a_boundary) * 0.8)
-            y_max = max(attained_aer.max() * 1.1, d_boundary.max() * 1.1)
+            y_min_values = [y_min] * len(dates)
             
             # Create figure
-            plt.figure(figsize=(10, 6))
+            fig = go.Figure()
             
-            # Add colored background zones
-            plt.fill_between(dates, y_min, a_boundary, color='lightgreen', alpha=0.3, label='A Rating')
-            plt.fill_between(dates, a_boundary, required_cii, color='palegreen', alpha=0.3, label='B Rating')
-            plt.fill_between(dates, required_cii, c_boundary, color='lightyellow', alpha=0.3, label='C Rating')
-            plt.fill_between(dates, c_boundary, d_boundary, color='bisque', alpha=0.3, label='D Rating')
-            plt.fill_between(dates, d_boundary, y_max, color='lightcoral', alpha=0.3, label='E Rating')
+            # Add color-coded background zones
+            # A zone (green)
+            fig.add_trace(go.Scatter(
+                x=dates + dates[::-1],
+                y=y_min_values + a_boundary[::-1],
+                fill='toself',
+                fillcolor='rgba(76, 175, 80, 0.2)',
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
             
-            # Add the attained AER line
-            plt.plot(dates, attained_aer, 'bo-', linewidth=2, markersize=6, label='Attained AER')
+            # B zone (light green)
+            fig.add_trace(go.Scatter(
+                x=dates + dates[::-1],
+                y=a_boundary + required_cii[::-1],
+                fill='toself',
+                fillcolor='rgba(139, 195, 74, 0.2)',
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+            
+            # C zone (amber)
+            fig.add_trace(go.Scatter(
+                x=dates + dates[::-1],
+                y=required_cii + c_boundary[::-1],
+                fill='toself',
+                fillcolor='rgba(255, 193, 7, 0.2)',
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+            
+            # D zone (orange)
+            fig.add_trace(go.Scatter(
+                x=dates + dates[::-1],
+                y=c_boundary + d_boundary[::-1],
+                fill='toself',
+                fillcolor='rgba(255, 152, 0, 0.2)',
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+            
+            # E zone (red)
+            fig.add_trace(go.Scatter(
+                x=dates + dates[::-1],
+                y=d_boundary + y_max_values[::-1],  # Fixed: Using the pre-created list
+                fill='toself',
+                fillcolor='rgba(244, 67, 54, 0.2)',
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+            
+            # Add the attained AER line and area
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=capped_attained_aer,
+                mode='lines',
+                name='YTD Attained AER',
+                line=dict(color='rgb(0, 170, 255)', width=3),
+                fill='tozeroy',
+                fillcolor='rgba(0, 170, 255, 0.2)'
+            ))
+            
+            # Add required CII line
+            fig.add_trace(go.Scatter(
+                x=dates, 
+                y=required_cii,
+                mode='lines',
+                name='Required CII',
+                line=dict(color='rgb(255, 152, 0)', width=2, dash='dash')
+            ))
             
             # Add boundary lines
-            plt.plot(dates, required_cii, 'k--', linewidth=1.5, label='Required CII')
-            plt.plot(dates, a_boundary, 'g:', linewidth=1, label='A-B Boundary')
-            plt.plot(dates, c_boundary, 'y:', linewidth=1, label='C-D Boundary')
-            plt.plot(dates, d_boundary, 'r:', linewidth=1, label='D-E Boundary')
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=a_boundary,
+                mode='lines',
+                name='A-B Boundary',
+                line=dict(color='rgb(139, 195, 74)', width=1, dash='dot')
+            ))
             
-            # Add current rating indicator
-            if not df.empty:
-                last_date = df['date'].iloc[-1]
-                last_aer = df['attained_aer'].iloc[-1]
-                last_rating = df['cii_rating'].iloc[-1]
-                
-                # Define a color for the last point based on rating
-                rating_colors = {
-                    'A': 'green',
-                    'B': 'lightgreen',
-                    'C': 'gold',
-                    'D': 'orange',
-                    'E': 'red'
-                }
-                
-                rating_color = rating_colors.get(last_rating, 'gray')
-                
-                # Add a highlight for current rating
-                plt.plot(last_date, last_aer, 'o', markersize=12, 
-                        markerfacecolor=rating_color, markeredgecolor='black', markeredgewidth=1.5)
-                
-                # Add annotation for current rating
-                plt.annotate(
-                    f'Current Rating: {last_rating}\nAER: {last_aer:.2f}',
-                    xy=(last_date, last_aer),
-                    xytext=(30, 20),
-                    textcoords='offset points',
-                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
-                    fontsize=10,
-                    arrowprops=dict(arrowstyle='->')
-                )
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=c_boundary,
+                mode='lines',
+                name='C-D Boundary',
+                line=dict(color='rgb(255, 152, 0)', width=1, dash='dot')
+            ))
             
-            # Basic styling
-            plt.xlabel('Date')
-            plt.ylabel('AER (gCO₂/dwt-nm)')
-            plt.title('Carbon Intensity Indicator (CII) Trend')
+            fig.add_trace(go.Scatter(
+                x=dates,
+                y=d_boundary,
+                mode='lines',
+                name='D-E Boundary',
+                line=dict(color='rgb(244, 67, 54)', width=1, dash='dot')
+            ))
             
-            # Format x-axis dates with no overlapping
-            plt.gcf().autofmt_xdate()
+            # Add annotations for the rating zones
+            annotations = []
             
-            # Add a simple grid
-            plt.grid(True, linestyle='--', alpha=0.5)
+            # Only add annotations if we have data
+            if dates:
+                annotations = [
+                    dict(
+                        x=dates[-1],
+                        y=max(y_min + 0.05 * (y_max - y_min), a_boundary[-1] * 0.5),
+                        xref="x",
+                        yref="y",
+                        text="A",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#4CAF50", size=16, weight="bold")
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=(a_boundary[-1] + required_cii[-1]) / 2,
+                        xref="x",
+                        yref="y",
+                        text="B",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#8BC34A", size=16, weight="bold")
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=(required_cii[-1] + c_boundary[-1]) / 2,
+                        xref="x",
+                        yref="y",
+                        text="C",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#FFC107", size=16, weight="bold")
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=(c_boundary[-1] + d_boundary[-1]) / 2,
+                        xref="x",
+                        yref="y",
+                        text="D",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#FF9800", size=16, weight="bold")
+                    ),
+                    dict(
+                        x=dates[-1],
+                        y=min(y_max - 0.05 * (y_max - y_min), d_boundary[-1] * 1.5),
+                        xref="x",
+                        yref="y",
+                        text="E",
+                        showarrow=False,
+                        align="right",
+                        font=dict(color="#F44336", size=16, weight="bold")
+                    )
+                ]
             
-            # Set y-axis limits
-            plt.ylim(y_min, y_max)
+            # Update layout
+            fig.update_layout(
+                title="Carbon Intensity Indicator (CII) Trend (YTD)",
+                xaxis_title="Date",
+                yaxis_title="AER (gCO₂/dwt-nm)",
+                template="plotly_dark",
+                height=500,
+                yaxis=dict(
+                    range=[y_min, y_max]
+                ),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5
+                ),
+                annotations=annotations
+            )
             
-            # Add a legend
-            plt.legend(loc='upper left')
+            # Format dates on x-axis
+            fig.update_xaxes(
+                tickformat="%d %b %Y",
+                tickangle=-45
+            )
             
-            # Tight layout
-            plt.tight_layout()
+            return fig
             
-            # Return the figure
-            return plt.gcf()
-                
         except Exception as e:
-            print(f"Error creating CII trend chart: {str(e)}")
+            st.error(f"Error creating CII trend chart: {str(e)}")
             traceback.print_exc()
             return None
     
