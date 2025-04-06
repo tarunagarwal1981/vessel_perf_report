@@ -33,40 +33,41 @@ class AdvancedReportGenerator:
                 # Display basic report preview
                 st.subheader("Vessel Performance Summary")
                 
-                # Extract metrics for preview
-                hull_condition, power_loss, fuel_savings, recommendation = self._get_hull_metrics(vessel_data, hull_agent)
-                ballast_avg, laden_avg = self._get_speed_metrics(vessel_data)
+                # Extract metrics from agents
+                hull_metrics = self._get_hull_metrics_from_agent(vessel_data, hull_agent)
+                speed_metrics = self._get_speed_metrics_from_agent(vessel_data, speed_agent)
                 
                 # Create preview layout similar to the document
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
                     st.markdown("### Hull & Propeller")
-                    st.markdown(f"**Condition:** {hull_condition}")
-                    st.markdown(f"**Power Loss:** {power_loss:.1f}%")
-                    st.markdown(f"**Potential Savings:** {fuel_savings:.1f} MT/D")
+                    st.markdown(f"**Condition:** {hull_metrics['condition']}")
+                    st.markdown(f"**Power Loss:** {hull_metrics['power_loss']:.1f}%")
+                    st.markdown(f"**Potential Savings:** {hull_metrics['fuel_savings']:.1f} MT/D")
                 
                 with col2:
                     st.markdown("### Speed & Consumption")
-                    st.markdown(f"**Ballast:** {ballast_avg:.1f} MT/day")
-                    st.markdown(f"**Laden:** {laden_avg:.1f} MT/day")
+                    st.markdown(f"**Ballast:** {speed_metrics['ballast_avg']:.1f} MT/day")
+                    st.markdown(f"**Laden:** {speed_metrics['laden_avg']:.1f} MT/day")
                 
                 with col3:
                     st.markdown("### Emissions")
                     st.markdown("**CII Rating:** A (Placeholder)")
                     st.markdown("**AER:** 2.9 (Placeholder)")
                 
-                # Display hull performance chart if available
+                # Display hull performance chart from hull agent
                 st.subheader("Hull & Propeller Performance Analysis")
-                hull_chart = self._create_hull_performance_chart(vessel_data)
+                # Get filtered data and generate chart using the existing agent
+                hull_chart = self._get_hull_performance_chart_from_agent(vessel_data, hull_agent)
                 if hull_chart:
                     st.plotly_chart(hull_chart, use_container_width=True, key=f"hull_preview_{str(uuid.uuid4())[:8]}")
                 
-                # Display speed-consumption charts
+                # Display speed-consumption charts from speed agent
                 st.subheader("Speed Consumption Profile")
                 col1, col2 = st.columns(2)
                 
-                ballast_chart, laden_chart = self._create_speed_consumption_charts(vessel_data)
+                ballast_chart, laden_chart = self._get_speed_consumption_charts_from_agent(vessel_data, speed_agent)
                 
                 with col1:
                     st.markdown("**Ballast Condition**")
@@ -112,25 +113,17 @@ class AdvancedReportGenerator:
                 if st.button("Generate Report"):
                     try:
                         with st.spinner("Generating report..."):
-                            # Extract metrics for report
-                            hull_condition, power_loss, fuel_savings, recommendation = self._get_hull_metrics(vessel_data, hull_agent)
-                            ballast_avg, laden_avg = self._get_speed_metrics(vessel_data)
+                            # Get metrics from agents for report
+                            hull_metrics = self._get_hull_metrics_from_agent(vessel_data, hull_agent)
+                            speed_metrics = self._get_speed_metrics_from_agent(vessel_data, speed_agent)
                             
                             # Generate the report document
                             docx_file = self._generate_formatted_report(
                                 vessel_name=selected_vessel,
                                 report_date=report_date,
                                 analyst_name=analyst_name,
-                                hull_metrics={
-                                    'condition': hull_condition,
-                                    'power_loss': power_loss,
-                                    'fuel_savings': fuel_savings,
-                                    'recommendation': recommendation
-                                },
-                                speed_metrics={
-                                    'ballast_avg': ballast_avg,
-                                    'laden_avg': laden_avg
-                                },
+                                hull_metrics=hull_metrics,
+                                speed_metrics=speed_metrics,
                                 options={
                                     'include_hull': include_hull,
                                     'include_speed': include_speed,
@@ -138,7 +131,9 @@ class AdvancedReportGenerator:
                                     'include_machinery': include_machinery,
                                     'template_option': template_option
                                 },
-                                vessel_data=vessel_data
+                                vessel_data=vessel_data,
+                                hull_agent=hull_agent,
+                                speed_agent=speed_agent
                             )
                             
                             # Create download button
@@ -158,9 +153,10 @@ class AdvancedReportGenerator:
             st.error(f"Error in report generation UI: {str(e)}")
             st.code(traceback.format_exc())
     
-    def _get_hull_metrics(self, vessel_data, hull_agent):
+    def _get_hull_metrics_from_agent(self, vessel_data, hull_agent):
+        """Get hull metrics using the hull performance agent"""
         try:
-            # Filter data for power loss
+            # Filter data for power loss (same logic as in hull_agent)
             filtered_data = []
             for entry in vessel_data:
                 if 'report_date' in entry and 'hull_roughness_power_loss' in entry:
@@ -174,7 +170,7 @@ class AdvancedReportGenerator:
                 # Get latest power loss
                 power_loss = filtered_data[-1].get('hull_roughness_power_loss', 0)
     
-                # Get condition
+                # Get condition using the agent's method
                 condition, _ = hull_agent.get_hull_condition(power_loss)
     
                 # Calculate savings (formula can be adjusted)
@@ -188,16 +184,32 @@ class AdvancedReportGenerator:
                 else:
                     recommendation = "Hull cleaning recommended as soon as possible."
     
-                return condition, power_loss, fuel_savings, recommendation
+                return {
+                    'condition': condition,
+                    'power_loss': power_loss,
+                    'fuel_savings': fuel_savings,
+                    'recommendation': recommendation
+                }
             else:
-                return "Unknown", 0, 0, "Insufficient data to provide recommendation."
+                return {
+                    'condition': "Unknown",
+                    'power_loss': 0,
+                    'fuel_savings': 0,
+                    'recommendation': "Insufficient data to provide recommendation."
+                }
     
         except Exception as e:
             # Log the error
             print(f"Error extracting hull metrics: {str(e)}")
-            return "Error", 0, 0, f"Error analyzing hull performance: {str(e)}"
+            return {
+                'condition': "Error",
+                'power_loss': 0,
+                'fuel_savings': 0,
+                'recommendation': f"Error analyzing hull performance: {str(e)}"
+            }
     
-    def _get_speed_metrics(self, vessel_data):
+    def _get_speed_metrics_from_agent(self, vessel_data, speed_agent):
+        """Get speed metrics using the speed consumption agent's data"""
         try:
             # Filter data for speed-consumption
             ballast_consumptions = []
@@ -215,249 +227,60 @@ class AdvancedReportGenerator:
             ballast_avg = sum(ballast_consumptions) / len(ballast_consumptions) if ballast_consumptions else 0
             laden_avg = sum(laden_consumptions) / len(laden_consumptions) if laden_consumptions else 0
             
-            return ballast_avg, laden_avg
+            return {
+                'ballast_avg': ballast_avg,
+                'laden_avg': laden_avg
+            }
         except Exception as e:
             print(f"Error extracting speed metrics: {str(e)}")
-            return 0, 0
+            return {
+                'ballast_avg': 0,
+                'laden_avg': 0
+            }
     
-    def _create_hull_performance_chart(self, vessel_data):
+    def _get_hull_performance_chart_from_agent(self, vessel_data, hull_agent):
+        """Get hull performance chart from the hull agent"""
         try:
             # Filter data for hull performance
             filtered_data = []
             for entry in vessel_data:
                 if 'report_date' in entry and 'hull_roughness_power_loss' in entry:
                     if entry['hull_roughness_power_loss'] is not None:
-                        filtered_data.append({
-                            'date': pd.to_datetime(entry['report_date']),
-                            'power_loss': entry['hull_roughness_power_loss']
-                        })
+                        filtered_data.append(entry)
             
-            if not filtered_data:
-                return None
-            
-            # Sort by date
-            filtered_data.sort(key=lambda x: x['date'])
-            
-            # Extract data for plotting
-            dates = [entry['date'] for entry in filtered_data]
-            power_loss = [entry['power_loss'] for entry in filtered_data]
-            
-            # Create figure
-            fig = go.Figure()
-            
-            # Add scatter plot
-            fig.add_trace(go.Scatter(
-                x=dates,
-                y=power_loss,
-                mode='markers+lines',
-                name='Hull Roughness - Power Loss',
-                line=dict(color='#0077b6', width=3),
-                marker=dict(
-                    size=8,
-                    color='#48cae4',
-                    line=dict(width=1, color='#023e8a')
+            if filtered_data:
+                # Use the agent's chart creation method
+                chart, _ = hull_agent.create_performance_chart(
+                    filtered_data,
+                    'hull_roughness_power_loss',
+                    "Hull Roughness - Excess Power Trend",
+                    "Excess Power (%)"
                 )
-            ))
-            
-            # Add threshold lines
-            fig.add_shape(
-                type="line",
-                x0=min(dates),
-                y0=15,
-                x1=max(dates),
-                y1=15,
-                line=dict(color="orange", width=2, dash="dash"),
-                name="Average Threshold"
-            )
-            
-            fig.add_shape(
-                type="line",
-                x0=min(dates),
-                y0=25,
-                x1=max(dates),
-                y1=25,
-                line=dict(color="red", width=2, dash="dash"),
-                name="Poor Threshold"
-            )
-            
-            # Add annotations
-            fig.add_annotation(
-                x=max(dates),
-                y=15,
-                text="15% - Average",
-                showarrow=False,
-                yshift=10,
-                font=dict(color="orange", size=12)
-            )
-            
-            fig.add_annotation(
-                x=max(dates),
-                y=25,
-                text="25% - Poor",
-                showarrow=False,
-                yshift=10,
-                font=dict(color="red", size=12)
-            )
-            
-            # Layout customization
-            fig.update_layout(
-                title="Hull Roughness - Excess Power Trend",
-                xaxis_title="Date",
-                yaxis_title="Excess Power (%)",
-                template="plotly_dark",
-                height=500,
-                margin=dict(l=40, r=40, t=40, b=40),
-                uirevision=str(uuid.uuid4())
-            )
-            
-            return fig
+                return chart
+            return None
         except Exception as e:
             print(f"Error creating hull performance chart: {str(e)}")
             return None
     
-    def _create_speed_consumption_charts(self, vessel_data):
+    def _get_speed_consumption_charts_from_agent(self, vessel_data, speed_agent):
+        """Get speed consumption charts from the speed agent"""
         try:
-            # Filter data
-            ballast_data = []
-            laden_data = []
+            # Use speed_agent's method for creating charts
+            ballast_chart = speed_agent.create_speed_consumption_chart(
+                vessel_data,
+                "ballast",
+                "Speed vs. Consumption - Ballast Condition"
+            )
             
-            for entry in vessel_data:
-                if ('speed' in entry and entry['speed'] is not None and 
-                    'normalised_consumption' in entry and entry['normalised_consumption'] is not None and
-                    'loading_condition' in entry and entry['loading_condition'] is not None):
-                    
-                    if entry['loading_condition'].lower() == 'ballast':
-                        ballast_data.append({
-                            'speed': entry['speed'],
-                            'consumption': entry['normalised_consumption']
-                        })
-                    elif entry['loading_condition'].lower() == 'laden':
-                        laden_data.append({
-                            'speed': entry['speed'],
-                            'consumption': entry['normalised_consumption']
-                        })
-            
-            # Create charts
-            ballast_chart = None
-            laden_chart = None
-            
-            if ballast_data:
-                ballast_speeds = [entry['speed'] for entry in ballast_data]
-                ballast_consumptions = [entry['consumption'] for entry in ballast_data]
-                
-                ballast_chart = go.Figure()
-                
-                # Add scatter points
-                ballast_chart.add_trace(go.Scatter(
-                    x=ballast_speeds,
-                    y=ballast_consumptions,
-                    mode='markers',
-                    name='Data Points',
-                    marker=dict(
-                        size=10,
-                        color='#48cae4',
-                        line=dict(width=1, color='#023e8a')
-                    )
-                ))
-                
-                # Add polynomial fit if enough data
-                if len(ballast_data) > 2:
-                    try:
-                        # Sort data for fitting
-                        sorted_indices = sorted(range(len(ballast_speeds)), key=lambda i: ballast_speeds[i])
-                        speeds_sorted = [ballast_speeds[i] for i in sorted_indices]
-                        consumptions_sorted = [ballast_consumptions[i] for i in sorted_indices]
-                        
-                        # Fit polynomial
-                        coeffs = np.polyfit(speeds_sorted, consumptions_sorted, 2)
-                        poly = np.poly1d(coeffs)
-                        
-                        # Generate points for curve
-                        x_smooth = np.linspace(min(speeds_sorted), max(speeds_sorted), 100)
-                        y_smooth = poly(x_smooth)
-                        
-                        # Add fit line
-                        ballast_chart.add_trace(go.Scatter(
-                            x=x_smooth,
-                            y=y_smooth,
-                            mode='lines',
-                            name='Trend Line',
-                            line=dict(color='#ff006e', width=3)
-                        ))
-                    except Exception as e:
-                        print(f"Error fitting ballast data: {str(e)}")
-                
-                # Layout
-                ballast_chart.update_layout(
-                    title="Speed vs. Consumption - Ballast",
-                    xaxis_title="Speed (knots)",
-                    yaxis_title="Fuel Consumption (mt/day)",
-                    template="plotly_dark",
-                    height=400,
-                    margin=dict(l=40, r=40, t=40, b=40),
-                    uirevision=str(uuid.uuid4())
-                )
-            
-            if laden_data:
-                laden_speeds = [entry['speed'] for entry in laden_data]
-                laden_consumptions = [entry['consumption'] for entry in laden_data]
-                
-                laden_chart = go.Figure()
-                
-                # Add scatter points
-                laden_chart.add_trace(go.Scatter(
-                    x=laden_speeds,
-                    y=laden_consumptions,
-                    mode='markers',
-                    name='Data Points',
-                    marker=dict(
-                        size=10,
-                        color='#48cae4',
-                        line=dict(width=1, color='#023e8a')
-                    )
-                ))
-                
-                # Add polynomial fit if enough data
-                if len(laden_data) > 2:
-                    try:
-                        # Sort data for fitting
-                        sorted_indices = sorted(range(len(laden_speeds)), key=lambda i: laden_speeds[i])
-                        speeds_sorted = [laden_speeds[i] for i in sorted_indices]
-                        consumptions_sorted = [laden_consumptions[i] for i in sorted_indices]
-                        
-                        # Fit polynomial
-                        coeffs = np.polyfit(speeds_sorted, consumptions_sorted, 2)
-                        poly = np.poly1d(coeffs)
-                        
-                        # Generate points for curve
-                        x_smooth = np.linspace(min(speeds_sorted), max(speeds_sorted), 100)
-                        y_smooth = poly(x_smooth)
-                        
-                        # Add fit line
-                        laden_chart.add_trace(go.Scatter(
-                            x=x_smooth,
-                            y=y_smooth,
-                            mode='lines',
-                            name='Trend Line',
-                            line=dict(color='#ff006e', width=3)
-                        ))
-                    except Exception as e:
-                        print(f"Error fitting laden data: {str(e)}")
-                
-                # Layout
-                laden_chart.update_layout(
-                    title="Speed vs. Consumption - Laden",
-                    xaxis_title="Speed (knots)",
-                    yaxis_title="Fuel Consumption (mt/day)",
-                    template="plotly_dark",
-                    height=400,
-                    margin=dict(l=40, r=40, t=40, b=40),
-                    uirevision=str(uuid.uuid4())
-                )
+            laden_chart = speed_agent.create_speed_consumption_chart(
+                vessel_data,
+                "laden",
+                "Speed vs. Consumption - Laden Condition"
+            )
             
             return ballast_chart, laden_chart
         except Exception as e:
-            print(f"Error creating speed charts: {str(e)}")
+            print(f"Error creating speed consumption charts: {str(e)}")
             return None, None
     
     def _save_chart_as_image(self, fig):
@@ -485,7 +308,6 @@ class AdvancedReportGenerator:
             print(f"Error saving chart image: {str(e)}")
             return None
     
-    # Method for replacing text in document
     def _replace_text_in_document(self, doc, replacements):
         # Replace in paragraphs
         for paragraph in doc.paragraphs:
@@ -502,7 +324,6 @@ class AdvancedReportGenerator:
                             if key in paragraph.text:
                                 paragraph.text = paragraph.text.replace(key, value)
     
-    # Method for replacing charts in document
     def _replace_chart_in_document(self, doc, placeholder, chart):
         # Save chart as image
         chart_path = self._save_chart_as_image(chart)
@@ -555,7 +376,8 @@ class AdvancedReportGenerator:
             print(f"Error replacing chart: {str(e)}")
             return False
     
-    def _generate_formatted_report(self, vessel_name, report_date, analyst_name, hull_metrics, speed_metrics, options, vessel_data):
+    def _generate_formatted_report(self, vessel_name, report_date, analyst_name, hull_metrics, 
+                                 speed_metrics, options, vessel_data, hull_agent, speed_agent):
         try:
             # Add debug expander
             debug_expander = st.expander("Report Generation Debug")
@@ -650,8 +472,8 @@ class AdvancedReportGenerator:
                 with debug_expander:
                     st.write("Generating and replacing charts...")
                 
-                # Generate hull performance chart
-                hull_chart = self._create_hull_performance_chart(vessel_data)
+                # Generate hull performance chart using the agent
+                hull_chart = self._get_hull_performance_chart_from_agent(vessel_data, hull_agent)
                 if hull_chart:
                     success = self._replace_chart_in_document(doc, '{{HULL_PERFORMANCE_CHART}}', hull_chart)
                     with debug_expander:
@@ -660,8 +482,8 @@ class AdvancedReportGenerator:
                         else:
                             st.warning("⚠️ Hull performance chart placeholder not found")
                 
-                # Generate and replace speed consumption charts
-                ballast_chart, laden_chart = self._create_speed_consumption_charts(vessel_data)
+                # Generate and replace speed consumption charts using the agent
+                ballast_chart, laden_chart = self._get_speed_consumption_charts_from_agent(vessel_data, speed_agent)
                 if ballast_chart:
                     success = self._replace_chart_in_document(doc, '{{BALLAST_CHART}}', ballast_chart)
                     with debug_expander:
