@@ -200,8 +200,17 @@ class CIIAgent:
                     'records': 0
                 }
             
+            # Get distance and convert to float if it's a string
+            distance = record.get('distance_travelled_actual', 0)
+            if distance is None:
+                distance = 0
+            elif isinstance(distance, str):
+                try:
+                    distance = float(distance)
+                except (ValueError, TypeError):
+                    distance = 0
+            
             # Add distance traveled
-            distance = record.get('distance_travelled_actual', 0) or 0
             monthly_data[month_key]['distance'] += distance
             
             # Calculate CO2 emissions from fuel consumption
@@ -220,15 +229,28 @@ class CIIAgent:
         """
         co2_total = 0
         
+        # Helper function to safely convert string to float
+        def safe_float(value, default=0):
+            if value is None:
+                return default
+            if isinstance(value, (int, float)):
+                return float(value)
+            if isinstance(value, str):
+                try:
+                    return float(value)
+                except (ValueError, TypeError):
+                    return default
+            return default
+        
         # Calculate CO2 for each fuel type
         # Subtracting fuel consumed at port (FC prefix) from total fuel
-        hfo = (record.get('fuel_consumption_hfo', 0) or 0) - (record.get('fc_fuel_consumption_hfo', 0) or 0)
-        lfo = (record.get('fuel_consumption_lfo', 0) or 0) - (record.get('fc_fuel_consumption_lfo', 0) or 0)
-        go_do = (record.get('fuel_consumption_go_do', 0) or 0) - (record.get('fc_fuel_consumption_go_do', 0) or 0)
-        lng = (record.get('fuel_consumption_lng', 0) or 0) - (record.get('fc_fuel_consumption_lng', 0) or 0)
-        lpg = (record.get('fuel_consumption_lpg', 0) or 0) - (record.get('fc_fuel_consumption_lpg', 0) or 0)
-        methanol = (record.get('fuel_consumption_methanol', 0) or 0) - (record.get('fc_fuel_consumption_methanol', 0) or 0)
-        ethanol = (record.get('fuel_consumption_ethanol', 0) or 0) - (record.get('fc_fuel_consumption_ethanol', 0) or 0)
+        hfo = safe_float(record.get('fuel_consumption_hfo')) - safe_float(record.get('fc_fuel_consumption_hfo'))
+        lfo = safe_float(record.get('fuel_consumption_lfo')) - safe_float(record.get('fc_fuel_consumption_lfo'))
+        go_do = safe_float(record.get('fuel_consumption_go_do')) - safe_float(record.get('fc_fuel_consumption_go_do'))
+        lng = safe_float(record.get('fuel_consumption_lng')) - safe_float(record.get('fc_fuel_consumption_lng'))
+        lpg = safe_float(record.get('fuel_consumption_lpg')) - safe_float(record.get('fc_fuel_consumption_lpg'))
+        methanol = safe_float(record.get('fuel_consumption_methanol')) - safe_float(record.get('fc_fuel_consumption_methanol'))
+        ethanol = safe_float(record.get('fuel_consumption_ethanol')) - safe_float(record.get('fc_fuel_consumption_ethanol'))
         
         # Apply emission factors
         co2_total += hfo * self.emission_factors['HFO']
