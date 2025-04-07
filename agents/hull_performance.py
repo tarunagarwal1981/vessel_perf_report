@@ -114,124 +114,145 @@ class HullPerformanceAgent:
     
     def create_performance_chart(self, data, metric_name, chart_title, y_axis_title):
         """
-        Create a publication-quality hull performance chart with linear trend line
-        using pure Matplotlib for maximum compatibility
+        Create a publication-quality hull performance chart with interactive elements
+        using Plotly for superior visualization quality
         """
         if not data:
             return None, None
-        
-        import matplotlib.pyplot as plt
-        import matplotlib.dates as mdates
-        import pandas as pd
-        import numpy as np
-        import io
-        import base64
-        
+
         # Prepare data
-        dates = [pd.to_datetime(row['report_date']) for row in data]
-        metric_values = [row.get(metric_name, 0) for row in data]
+        df = pd.DataFrame(data)
+        df['report_date'] = pd.to_datetime(df['report_date'])
+        df = df.sort_values('report_date')
         
-        # Sort data for proper trend line
-        sorted_indices = np.argsort(dates)
-        dates_sorted = [dates[i] for i in sorted_indices]
-        metric_values_sorted = [metric_values[i] for i in sorted_indices]
-        
-        # Create a plain figure with simple styling
-        plt.figure(figsize=(10, 6))
-        
-        # Add colored background zones for hull roughness power loss
+        # Create figure
+        fig = go.Figure()
+
+        # Add shaded regions for power loss only
         if metric_name == 'hull_roughness_power_loss':
-            y_max = max(max(metric_values) * 1.2, 40)
-            
-            # Good zone (0-15%)
-            plt.axhspan(0, 15, color='lightgreen', alpha=0.3, label='Good Condition')
-            
-            # Average zone (15-25%)
-            plt.axhspan(15, 25, color='lightyellow', alpha=0.3, label='Average Condition')
-            
-            # Poor zone (>25%)
-            plt.axhspan(25, y_max, color='lightcoral', alpha=0.3, label='Poor Condition')
-            
-            # Add threshold lines
-            plt.axhline(y=15, color='orange', linestyle='--', alpha=0.7, linewidth=1.5, 
-                       label='Good/Average Threshold (15%)')
-            plt.axhline(y=25, color='red', linestyle='--', alpha=0.7, linewidth=1.5, 
-                       label='Average/Poor Threshold (25%)')
-        
-        # Create scatter plot with plain colored points
-        plt.scatter(dates, metric_values, s=60, c='blue', alpha=0.7, label='Performance Data')
-        
-        # Calculate linear trend
+            # Add colored background zones
+            fig.add_shape(type="rect", x0=df['report_date'].min(), x1=df['report_date'].max(),
+                          y0=0, y1=15, fillcolor="green", opacity=0.1, layer="below",
+                          line=dict(width=0))
+            fig.add_shape(type="rect", x0=df['report_date'].min(), x1=df['report_date'].max(),
+                          y0=15, y1=25, fillcolor="orange", opacity=0.1, layer="below",
+                          line=dict(width=0))
+            fig.add_shape(type="rect", x0=df['report_date'].min(), x1=df['report_date'].max(),
+                          y0=25, y1=df[metric_name].max()*1.2, fillcolor="red", opacity=0.1,
+                          layer="below", line=dict(width=0))
+
+        # Add raw data points
+        fig.add_trace(go.Scatter(
+            x=df['report_date'],
+            y=df[metric_name],
+            mode='markers+lines',
+            name='Measured Data',
+            line=dict(color='#1f77b4', width=2, dash='dot'),
+            marker=dict(
+                size=8,
+                color='#1f77b4',
+                line=dict(width=1, color='DarkSlateGrey')
+        ))
+
+        # Add trend line if enough data points
         latest_value = None
-        if len(dates_sorted) > 1:
-            # Convert dates to numbers for linear regression
-            x_numeric = mdates.date2num(dates_sorted)
-            y = np.array(metric_values_sorted)
+        if len(df) > 1:
+            # Calculate linear trend
+            x_numeric = df['report_date'].astype(np.int64) // 10**9  # Convert to seconds
+            coeffs = np.polyfit(x_numeric, df[metric_name], 1)
+            trend_line = np.poly1d(coeffs)(x_numeric)
             
-            # Calculate linear regression
-            coeffs = np.polyfit(x_numeric, y, 1)
-            slope = coeffs[0]
-            intercept = coeffs[1]
-            
-            # Create line points
-            x_line = np.array([min(x_numeric), max(x_numeric)])
-            y_line = slope * x_line + intercept
-            
-            # Plot trend line
-            plt.plot(mdates.num2date(x_line), y_line, 'r-', linewidth=2, 
-                    label=f'Trend Line (Slope: {slope:.4f}% per day)')
-            
-            # Get the latest value from the trend line
-            latest_value = y_line[-1]
-            
-            # Add annotation for latest value
-            if latest_value is not None:
-                # Determine condition based on value
-                if metric_name == 'hull_roughness_power_loss':
-                    if latest_value < 15:
-                        condition = 'GOOD'
-                    elif latest_value < 25:
-                        condition = 'AVERAGE'
-                    else:
-                        condition = 'POOR'
-                else:
-                    condition = ''
-                
-                # Simple annotation without fancy styling
-                plt.annotate(
-                    f'Latest: {latest_value:.2f}%\nCondition: {condition}',
-                    xy=(dates_sorted[-1], latest_value),
-                    xytext=(20, 10),
-                    textcoords='offset points',
-                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
-                    fontsize=10
-                )
-        
-        # Basic styling
-        plt.xlabel('Date')
-        plt.ylabel(y_axis_title)
-        plt.title(chart_title)
-        
-        # Format x-axis dates with no overlapping
-        plt.gcf().autofmt_xdate()
-        
-        # Add a simple grid
-        plt.grid(True, linestyle='--', alpha=0.5)
-        
-        # Set y-axis to start at 0
-        plt.ylim(bottom=0)
-        
-        # Add a legend
-        plt.legend()
-        
-        # Tight layout
-        plt.tight_layout()
-        
-        # For compatibility, return both the Matplotlib figure and the latest value
-        # Your report generator will need to handle the Matplotlib figure directly
-        fig = plt.gcf()  # Get current figure
-        
-        # Return the figure and latest value
+            fig.add_trace(go.Scatter(
+                x=df['report_date'],
+                y=trend_line,
+                mode='lines',
+                name='Trend Line',
+                line=dict(color='firebrick', width=3),
+                hoverinfo='skip'
+            ))
+
+            # Calculate latest trend value
+            latest_value = trend_line[-1]
+
+            # Add trend annotation
+            fig.add_annotation(
+                x=df['report_date'].iloc[-1],
+                y=latest_value,
+                text=f"Current Trend: {latest_value:.1f}%",
+                showarrow=True,
+                arrowhead=4,
+                ax=-50,
+                ay=-40,
+                font=dict(size=12, color='firebrick'),
+                bordercolor='firebrick',
+                borderwidth=1,
+                borderpad=4,
+                bgcolor='white'
+            )
+
+        # Add condition zones if power loss
+        if metric_name == 'hull_roughness_power_loss':
+            fig.add_annotation(
+                x=0.5, y=0.95,
+                xref='paper', yref='paper',
+                text="Condition Zones:<br><span style='color:green'>Good</span> | "
+                     "<span style='color:orange'>Average</span> | <span style='color:red'>Poor</span>",
+                showarrow=False,
+                font=dict(size=12),
+                bordercolor='black',
+                bgcolor='white'
+            )
+
+        # Update layout for publication quality
+        fig.update_layout(
+            title=dict(
+                text=chart_title,
+                font=dict(size=24, family='Arial', color='#2a2a2a'),
+                x=0.03,
+                y=0.93
+            ),
+            xaxis=dict(
+                title='Date',
+                titlefont=dict(size=18, family='Arial', color='#2a2a2a'),
+                tickfont=dict(size=14, color='#2a2a2a'),
+                gridcolor='lightgrey',
+                showgrid=True,
+                linecolor='#2a2a2a',
+                mirror=True
+            ),
+            yaxis=dict(
+                title=y_axis_title,
+                titlefont=dict(size=18, family='Arial', color='#2a2a2a'),
+                tickfont=dict(size=14, color='#2a2a2a'),
+                gridcolor='lightgrey',
+                showgrid=True,
+                zeroline=False,
+                linecolor='#2a2a2a',
+                mirror=True,
+                range=[0, max(df[metric_name].max()*1.2, 40][0]  # Cap at 40% if needed
+            ),
+            legend=dict(
+                orientation='h',
+                yanchor='bottom',
+                y=1.02,
+                xanchor='right',
+                x=1,
+                font=dict(size=14)
+            ),
+            plot_bgcolor='white',
+            margin=dict(l=50, r=30, t=80, b=50),
+            hovermode='x unified',
+            hoverlabel=dict(
+                bgcolor='white',
+                font_size=14,
+                font_family='Arial'
+            )
+        )
+
+        # Add custom grid lines
+        fig.update_yaxes(showline=True, linewidth=2, linecolor='gray')
+        fig.update_xaxes(showline=True, linewidth=2, linecolor='gray')
+
         return fig, latest_value
     def get_hull_condition(self, hull_roughness):
         if hull_roughness < 15:
