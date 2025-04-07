@@ -122,132 +122,193 @@ class HullPerformanceAgent:
     
     def create_performance_chart(self, data, metric_name, chart_title, y_axis_title):
         """
-        Create a simplified hull performance chart that reliably renders in Streamlit
+        Create a publication-quality hull performance chart with neon effects and dark theme
         """
         if not data:
             return None, None
-        
+    
         import matplotlib.pyplot as plt
-        import numpy as np
-        import pandas as pd
         import matplotlib.dates as mdates
-        
+        import numpy as np
+        from matplotlib.gridspec import GridSpec
+        import matplotlib.patheffects as path_effects
+        from matplotlib.colors import LinearSegmentedColormap
+        from matplotlib.collections import LineCollection
+    
+        # Set the style for publication quality
+        plt.style.use('default')  # Reset to default style
+        plt.rcParams['figure.dpi'] = 300
+        plt.rcParams['font.family'] = 'DejaVu Sans'  # Use a default font that's widely available
+        plt.rcParams['axes.linewidth'] = 1.2
+    
         # Prepare data
-        df = pd.DataFrame({
-            'date': [pd.to_datetime(row['report_date']) for row in data],
-            'value': [row.get(metric_name, 0) for row in data]
-        })
-        
-        # Sort by date
-        df = df.sort_values('date')
-        
-        # Create a basic figure with standard styling
-        fig, ax = plt.subplots(figsize=(12, 8))
-        
-        # Add colored background zones for hull roughness power loss
-        if metric_name == 'hull_roughness_power_loss':
-            # Good zone (0-15%)
-            ax.axhspan(0, 15, color='green', alpha=0.1, label='Good Condition')
-            
-            # Average zone (15-25%)
-            ax.axhspan(15, 25, color='orange', alpha=0.1, label='Average Condition')
-            
-            # Poor zone (>25%)
-            ax.axhspan(25, max(df['value'].max() * 1.2, 40), color='red', alpha=0.1, label='Poor Condition')
-            
-            # Add threshold lines
-            ax.axhline(y=15, color='orange', linestyle='--', alpha=0.7, linewidth=1.5, 
-                      label='Good/Average Threshold (15%)')
-            ax.axhline(y=25, color='red', linestyle='--', alpha=0.7, linewidth=1.5, 
-                      label='Average/Poor Threshold (25%)')
-        
-        # Plot scatter points with color gradient based on date
-        scatter = ax.scatter(df['date'], df['value'], 
-                             c=range(len(df)), 
-                             cmap='viridis', 
-                             s=80, 
-                             alpha=0.7,
-                             edgecolor='w',
-                             linewidth=0.5,
-                             label='Performance Data')
-        
+        dates = [pd.to_datetime(row['report_date']) for row in data]
+        metric_values = [row.get(metric_name, 0) for row in data]
+        dates_num = mdates.date2num(dates)
+    
+        # Create figure with dark background
+        fig = plt.figure(figsize=(12, 8))
+        fig.patch.set_facecolor('#1a1a1a')
+    
+        # Create subplot with GridSpec
+        gs = GridSpec(2, 1, height_ratios=[4, 1], hspace=0.3)
+        ax1 = plt.subplot(gs[0])
+        ax1.set_facecolor('#1a1a1a')
+    
+        # Calculate trend line
+        z = np.polyfit(dates_num, metric_values, 1)
+        p = np.poly1d(z)
+        trend_line = p(dates_num)
+        latest_value = trend_line[-1] if len(trend_line) > 0 else None
+    
+        # Create neon color gradient
+        neon_colors = ['#FF00FF', '#00FF00', '#00FFFF', '#FF0099', '#7F00FF']
+        cmap = LinearSegmentedColormap.from_list('neon', neon_colors)
+    
+        # Create zone backgrounds
+        zones = [
+            (0, 15, '#004400', 'Good Zone'),
+            (15, 25, '#443300', 'Average Zone'),
+            (25, 40, '#440000', 'Poor Zone')
+        ]
+    
+        for start, end, color, label in zones:
+            ax1.axhspan(start, end, color=color, alpha=0.3, label=label)
+    
+        # Add trend line with enhanced glow effect
+        # Outer glow
+        ax1.plot(dates, trend_line, color='white', linewidth=8, alpha=0.1, zorder=2)
+        # Inner glow
+        ax1.plot(dates, trend_line, color='white', linewidth=4, alpha=0.2, zorder=3)
+        # Main line with gradient
+        points = np.array([dates_num, trend_line]).T.reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        lc = LineCollection(segments, cmap=cmap, linewidth=2)
+        lc.set_array(np.linspace(0, 1, len(dates)))
+        ax1.add_collection(lc)
+    
+        # Add threshold lines with neon glow
+        for threshold, color, label in [(15, '#00FF00', 'Good/Average Threshold'),
+                                       (25, '#FF0000', 'Average/Poor Threshold')]:
+            # Outer glow
+            ax1.axhline(y=threshold, color=color, linestyle='-',
+                        alpha=0.2, linewidth=4, zorder=1)
+            # Inner glow
+            ax1.axhline(y=threshold, color=color, linestyle='-',
+                        alpha=0.4, linewidth=2, zorder=2)
+            # Main line
+            ax1.axhline(y=threshold, color=color, linestyle='-',
+                        alpha=0.8, linewidth=1, label=label,
+                        path_effects=[path_effects.SimpleLineShadow(offset=(0, 0),
+                                                                  alpha=0.2),
+                                    path_effects.Normal()],
+                        zorder=3)
+    
+        # Plot scatter points with enhanced neon glow effect
+        # Outer glow
+        ax1.scatter(dates, metric_values,
+                    c=np.arange(len(dates)),
+                    cmap=cmap,
+                    s=200,
+                    alpha=0.1,
+                    zorder=4)
+    
+        # Middle glow
+        ax1.scatter(dates, metric_values,
+                    c=np.arange(len(dates)),
+                    cmap=cmap,
+                    s=150,
+                    alpha=0.2,
+                    zorder=5)
+    
+        # Main points
+        scatter = ax1.scatter(dates, metric_values,
+                             c=np.arange(len(dates)),
+                             cmap=cmap,
+                             s=100,
+                             alpha=1,
+                             edgecolor='white',
+                             linewidth=1,
+                             label='Performance Data',
+                             zorder=6)
+    
+        # Inner highlight
+        ax1.scatter(dates, metric_values,
+                    c='white',
+                    s=30,
+                    alpha=0.5,
+                    zorder=7)
+    
+        # Styling for dark theme
+        title = ax1.set_title(chart_title,
+                             fontsize=16,
+                             pad=20,
+                             fontweight='bold',
+                             color='white')
+        title.set_path_effects([path_effects.SimpleLineShadow(offset=(2, 2),
+                                                             alpha=0.3),
+                               path_effects.Normal()])
+    
+        ax1.set_xlabel('Date', fontsize=12, labelpad=10, color='white')
+        ax1.set_ylabel(y_axis_title, fontsize=12, labelpad=10, color='white')
+    
+        # Format axes
+        ax1.tick_params(axis='both', which='major', labelsize=10, colors='white')
+        ax1.xaxis.set_major_locator(mdates.MonthLocator())
+        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        plt.setp(ax1.get_xticklabels(), rotation=45, ha='right')
+    
+        # Customize grid
+        ax1.grid(True, linestyle='--', alpha=0.2, color='white', zorder=0)
+    
         # Add colorbar
-        cbar = plt.colorbar(scatter)
-        cbar.set_label('Time Progression')
-        
-        # Calculate and plot linear trend
-        latest_value = None
-        if len(df) > 1:
-            # Convert dates to ordinal values for regression
-            x_numeric = mdates.date2num(df['date'])
-            y = df['value'].values
-            
-            # Calculate linear regression
-            coeffs = np.polyfit(x_numeric, y, 1)
-            slope = coeffs[0]
-            intercept = coeffs[1]
-            
-            # Create line points
-            x_line = np.array([min(x_numeric), max(x_numeric)])
-            y_line = slope * x_line + intercept
-            
-            # Plot trend line
-            ax.plot(mdates.num2date(x_line), y_line, 'r-', linewidth=2, 
-                   label=f'Trend Line (Slope: {slope:.4f}% per day)')
-            
-            # Get the latest value from the trend line
-            latest_value = y_line[-1]
-            
-            # Add annotation for latest value
-            if latest_value is not None:
-                # Determine condition based on value
-                if metric_name == 'hull_roughness_power_loss':
-                    if latest_value < 15:
-                        color = 'green'
-                        condition = 'GOOD'
-                    elif latest_value < 25:
-                        color = 'orange'
-                        condition = 'AVERAGE'
-                    else:
-                        color = 'red'
-                        condition = 'POOR'
-                else:
-                    color = 'blue'
-                    condition = ''
-                
-                # Add text annotation
-                ax.annotate(
-                    f'Latest: {latest_value:.2f}%\nCondition: {condition}',
-                    xy=(df['date'].iloc[-1], latest_value),
-                    xytext=(30, 0),
-                    textcoords='offset points',
-                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.7),
-                    fontsize=11,
-                    color=color,
-                    weight='bold'
-                )
-        
-        # Style the chart
-        ax.set_title(chart_title, fontsize=16, fontweight='bold')
-        ax.set_xlabel('Date', fontsize=12)
-        ax.set_ylabel(y_axis_title, fontsize=12)
-        
-        # Format x-axis dates
-        fig.autofmt_xdate()
-        
-        # Add grid
-        ax.grid(True, linestyle='--', alpha=0.7)
-        
-        # Set y-axis to start at 0
-        ax.set_ylim(bottom=0)
-        
-        # Add legend
-        ax.legend(loc='best')
-        
-        # Tight layout
-        plt.tight_layout()
-        
-        # Return the figure and latest value
+        cbar = plt.colorbar(scatter, ax=ax1, pad=0.02)
+        cbar.set_label('Time Progression', fontsize=10, color='white')
+        cbar.ax.yaxis.set_tick_params(color='white')
+        cbar.ax.tick_params(labelcolor='white')
+    
+        # Update spines color
+        for spine in ax1.spines.values():
+            spine.set_color('white')
+    
+        # Add legend with dark theme styling
+        legend = ax1.legend(bbox_to_anchor=(1.15, 1),
+                           loc='upper left',
+                           fontsize=10,
+                           frameon=True,
+                           facecolor='#1a1a1a',
+                           edgecolor='white',
+                           shadow=True)
+        for text in legend.get_texts():
+            text.set_color('white')
+    
+        # Add statistics subplot
+        ax2 = plt.subplot(gs[1])
+        ax2.set_facecolor('#1a1a1a')
+        stats_text = f"""
+        Statistical Summary:
+        • Mean: {np.mean(metric_values):.2f}%
+        • Median: {np.median(metric_values):.2f}%
+        • Std Dev: {np.std(metric_values):.2f}%
+        • Latest Value: {metric_values[-1]:.2f}%
+        • Trend Direction: {'Improving' if z[0] < 0 else 'Degrading'}
+        """
+    
+        # Add stats box with dark theme
+        stats = ax2.text(0.05, 0.5, stats_text,
+                         transform=ax2.transAxes,
+                         bbox=dict(facecolor='#1a1a1a',
+                                  edgecolor='white',
+                                  alpha=0.8,
+                                  boxstyle='round,pad=1'),
+                         fontsize=10,
+                         color='white',
+                         verticalalignment='center')
+        ax2.axis('off')
+    
+        # Adjust layout
+        fig.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
+    
         return fig, latest_value
     def get_hull_condition(self, hull_roughness):
         if hull_roughness < 15:
