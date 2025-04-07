@@ -229,7 +229,7 @@ class HullPerformanceAgent:
                 zeroline=False,
                 linecolor='#2a2a2a',
                 mirror=True,
-                range=[0, max(df[metric_name].max()*1.2, 40][0]  # Cap at 40% if needed
+                range=[0, max(df[metric_name].max() * 1.2, 40)]  # Cap at 40% if needed
             ),
             legend=dict(
                 orientation='h',
