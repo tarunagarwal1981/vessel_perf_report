@@ -114,150 +114,250 @@ class HullPerformanceAgent:
     
     def create_performance_chart(self, data, metric_name, chart_title, y_axis_title):
         """
-        Create a publication-quality hull performance chart with interactive elements
-        using Plotly for superior visualization quality
+        Create a high-impact hull performance chart with neon styling
         """
         if not data:
             return None, None
-
-        # Prepare data
-        df = pd.DataFrame(data)
-        df['report_date'] = pd.to_datetime(df['report_date'])
-        df = df.sort_values('report_date')
         
-        # Create figure
-        fig = go.Figure()
-
-        # Add shaded regions for power loss only
-        if metric_name == 'hull_roughness_power_loss':
-            # Add colored background zones
-            fig.add_shape(type="rect", x0=df['report_date'].min(), x1=df['report_date'].max(),
-                          y0=0, y1=15, fillcolor="green", opacity=0.1, layer="below",
-                          line=dict(width=0))
-            fig.add_shape(type="rect", x0=df['report_date'].min(), x1=df['report_date'].max(),
-                          y0=15, y1=25, fillcolor="orange", opacity=0.1, layer="below",
-                          line=dict(width=0))
-            fig.add_shape(type="rect", x0=df['report_date'].min(), x1=df['report_date'].max(),
-                          y0=25, y1=df[metric_name].max()*1.2, fillcolor="red", opacity=0.1,
-                          layer="below", line=dict(width=0))
-
-        # Add raw data points
-        fig.add_trace(go.Scatter(
-            x=df['report_date'],
-            y=df[metric_name],
-            mode='markers+lines',
-            name='Measured Data',
-            line=dict(color='#1f77b4', width=2, dash='dot'),
-            marker=dict(
-                size=8,
-                color='#1f77b4',
-                line=dict(width=1, color='DarkSlateGrey')
-            )     
-        ))
-
-        # Add trend line if enough data points
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import pandas as pd
+        import matplotlib.dates as mdates
+        import matplotlib.patheffects as path_effects
+        from matplotlib.colors import LinearSegmentedColormap
+        from matplotlib.collections import LineCollection
+        from matplotlib.gridspec import GridSpec
+        
+        # Prepare data
+        df = pd.DataFrame({
+            'date': [pd.to_datetime(row['report_date']) for row in data],
+            'value': [row.get(metric_name, 0) for row in data]
+        })
+        
+        # Sort by date
+        df = df.sort_values('date')
+        
+        # Set the style for publication quality
+        plt.rcParams['figure.dpi'] = 300
+        plt.rcParams['font.family'] = 'sans-serif'
+        plt.rcParams['axes.linewidth'] = 1.2
+        
+        # Create figure with dark background
+        fig = plt.figure(figsize=(12, 8))
+        fig.patch.set_facecolor('#1a1a1a')
+        
+        # Main plot
+        ax = plt.subplot()
+        ax.set_facecolor('#1a1a1a')
+        
+        # Extract data
+        dates = df['date']
+        metric_values = df['value']
+        
+        # Create subtle zone backgrounds
+        zones = [
+            (0, 15, '#004400', 'Good Zone'),
+            (15, 25, '#443300', 'Average Zone'),
+            (25, max(metric_values.max() * 1.2, 40), '#440000', 'Poor Zone')
+        ]
+        
+        for start, end, color, label in zones:
+            ax.axhspan(start, end, color=color, alpha=0.3, label=label)
+        
+        # Calculate trend line
         latest_value = None
-        if len(df) > 1:
-            # Calculate linear trend
-            x_numeric = df['report_date'].astype(np.int64) // 10**9  # Convert to seconds
-            coeffs = np.polyfit(x_numeric, df[metric_name], 1)
-            trend_line = np.poly1d(coeffs)(x_numeric)
+        if len(dates) > 1:
+            dates_num = mdates.date2num(dates)
+            z = np.polyfit(dates_num, metric_values, 1)
+            p = np.poly1d(z)
+            trend_line = p(dates_num)
             
-            fig.add_trace(go.Scatter(
-                x=df['report_date'],
-                y=trend_line,
-                mode='lines',
-                name='Trend Line',
-                line=dict(color='firebrick', width=3),
-                hoverinfo='skip'
-            ))
-
-            # Calculate latest trend value
+            # Get latest value from trend line
             latest_value = trend_line[-1]
-
-            # Add trend annotation
-            fig.add_annotation(
-                x=df['report_date'].iloc[-1],
-                y=latest_value,
-                text=f"Current Trend: {latest_value:.1f}%",
-                showarrow=True,
-                arrowhead=4,
-                ax=-50,
-                ay=-40,
-                font=dict(size=12, color='firebrick'),
-                bordercolor='firebrick',
-                borderwidth=1,
-                borderpad=4,
-                bgcolor='white'
-            )
-
-        # Add condition zones if power loss
-        if metric_name == 'hull_roughness_power_loss':
-            fig.add_annotation(
-                x=0.5, y=0.95,
-                xref='paper', yref='paper',
-                text="Condition Zones:<br><span style='color:green'>Good</span> | "
-                     "<span style='color:orange'>Average</span> | <span style='color:red'>Poor</span>",
-                showarrow=False,
-                font=dict(size=12),
-                bordercolor='black',
-                bgcolor='white'
-            )
-
-        # Update layout for publication quality
-        fig.update_layout(
-            title=dict(
-                text=chart_title,
-                font=dict(size=24, family='Arial', color='#2a2a2a'),
-                x=0.03,
-                y=0.93
-            ),
-            xaxis=dict(
-                title=dict(
-                    text='Date',
-                    font=dict(size=18, family='Arial', color='#2a2a2a')
+            
+            # Create improved neon color gradient - better distinction between old and new
+            neon_colors = [
+                '#00FFFF',  # Cyan (oldest)
+                '#00FF00',  # Green
+                '#FFFF00',  # Yellow
+                '#FF00FF',  # Magenta
+                '#FF0000'   # Red (newest)
+            ]
+            
+            # Create custom colormap for the neon effect
+            cmap = LinearSegmentedColormap.from_list('neon', neon_colors)
+            
+            # Add trend line with glow effect
+            # Outer glow
+            ax.plot(dates, trend_line, 
+                    color='white', 
+                    linewidth=8, 
+                    alpha=0.1, 
+                    zorder=2)
+            
+            # Inner glow
+            ax.plot(dates, trend_line, 
+                    color='white', 
+                    linewidth=4, 
+                    alpha=0.2, 
+                    zorder=3)
+            
+            # Main line with gradient color - BRIGHTER
+            points = np.array([dates_num, trend_line]).T.reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            lc = LineCollection(segments, cmap=cmap, linewidth=3)  # Increased linewidth
+            lc.set_array(np.linspace(0, 1, len(dates)))
+            ax.add_collection(lc)
+        
+        # Add threshold lines with neon glow
+        for threshold, color, label in [(15, '#00FF00', 'Good/Average Threshold'),
+                                       (25, '#FF0000', 'Average/Poor Threshold')]:
+            # Outer glow
+            ax.axhline(y=threshold, color=color, linestyle='-',
+                        alpha=0.2, linewidth=4, zorder=1)
+            # Inner glow
+            ax.axhline(y=threshold, color=color, linestyle='-',
+                        alpha=0.4, linewidth=2, zorder=2)
+            # Main line
+            line = ax.axhline(y=threshold, color=color, linestyle='-',
+                             alpha=0.8, linewidth=1, label=label,
+                             path_effects=[path_effects.SimpleLineShadow(offset=(0, 0),
+                                                                         alpha=0.2),
+                                          path_effects.Normal()],
+                             zorder=3)
+        
+        # Plot scatter points with enhanced neon glow effect - BRIGHTER
+        # Outer glow
+        ax.scatter(dates, metric_values,
+                  c=np.arange(len(dates)),
+                  cmap=cmap,
+                  s=200,
+                  alpha=0.15,  # Slightly increased
+                  zorder=4)
+        
+        # Middle glow
+        ax.scatter(dates, metric_values,
+                  c=np.arange(len(dates)),
+                  cmap=cmap,
+                  s=150,
+                  alpha=0.25,  # Slightly increased
+                  zorder=5)
+        
+        # Main points - BRIGHTER
+        scatter = ax.scatter(dates, metric_values,
+                            c=np.arange(len(dates)),
+                            cmap=cmap,
+                            s=100,
+                            alpha=1,
+                            edgecolor='white',
+                            linewidth=1.5,  # Slightly increased
+                            label='Performance Data',
+                            zorder=6)
+        
+        # Inner highlight - BRIGHTER
+        ax.scatter(dates, metric_values,
+                  c='white',
+                  s=35,  # Slightly increased
+                  alpha=0.6,  # Slightly increased
+                  zorder=7)
+        
+        # Add latest value annotation
+        if latest_value is not None:
+            # Determine color and condition based on value
+            if metric_name == 'hull_roughness_power_loss':
+                if latest_value < 15:
+                    color = '#00FF00'  # Neon Green
+                    condition = 'GOOD'
+                elif latest_value < 25:
+                    color = '#FFFF00'  # Neon Yellow
+                    condition = 'AVERAGE'
+                else:
+                    color = '#FF0000'  # Neon Red
+                    condition = 'POOR'
+            else:
+                color = '#FF00FF'  # Neon Magenta
+                condition = ''
+            
+            # Add glowing annotation for latest value
+            annotation = ax.annotate(
+                f'Latest: {latest_value:.2f}%\nCondition: {condition}',
+                xy=(dates.iloc[-1], latest_value),
+                xytext=(30, 20),
+                textcoords='offset points',
+                bbox=dict(
+                    boxstyle='round,pad=0.5',
+                    facecolor='black',
+                    alpha=0.7,
+                    edgecolor=color,
+                    linewidth=2
                 ),
-                tickfont=dict(size=14, color='#2a2a2a'),
-                gridcolor='lightgrey',
-                showgrid=True,
-                linecolor='#2a2a2a',
-                mirror=True
-            ),
-            yaxis=dict(
-                title=dict(
-                    text=y_axis_title,
-                    font=dict(size=18, family='Arial', color='#2a2a2a')
+                fontsize=12,
+                color=color,
+                weight='bold',
+                path_effects=[
+                    path_effects.withSimplePatchShadow(offset=(1, 1), shadow_rgbFace='black', alpha=0.9),
+                    path_effects.Normal()
+                ],
+                arrowprops=dict(
+                    arrowstyle='->',
+                    color=color,
+                    linewidth=2,
+                    alpha=0.8,
+                    path_effects=[
+                        path_effects.SimpleLineShadow(offset=(1, 1), alpha=0.3),
+                        path_effects.Normal()
+                    ]
                 ),
-                tickfont=dict(size=14, color='#2a2a2a'),
-                gridcolor='lightgrey',
-                showgrid=True,
-                zeroline=False,
-                linecolor='#2a2a2a',
-                mirror=True,
-                range=[0, max(df[metric_name].max() * 1.2, 40)]
-            ),
-            legend=dict(
-                orientation='h',
-                yanchor='bottom',
-                y=1.02,
-                xanchor='right',
-                x=1,
-                font=dict(size=14)
-            ),
-            plot_bgcolor='white',
-            margin=dict(l=50, r=30, t=80, b=50),
-            hovermode='x unified',
-            hoverlabel=dict(
-                bgcolor='white',
-                font_size=14,
-                font_family='Arial'
+                zorder=8
             )
-        )
-
-        # Add custom grid lines
-        fig.update_yaxes(showline=True, linewidth=2, linecolor='gray')
-        fig.update_xaxes(showline=True, linewidth=2, linecolor='gray')
-
+        
+        # Styling for dark theme
+        title = ax.set_title(chart_title,
+                            fontsize=16,
+                            pad=20,
+                            fontweight='bold',
+                            color='white')
+        title.set_path_effects([path_effects.SimpleLineShadow(offset=(2, 2),
+                                                            alpha=0.3),
+                              path_effects.Normal()])
+        
+        ax.set_xlabel('Date', fontsize=12, labelpad=10, color='white')
+        ax.set_ylabel(y_axis_title, fontsize=12, labelpad=10, color='white')
+        
+        # Format axes
+        ax.tick_params(axis='both', which='major', labelsize=10, colors='white')
+        ax.xaxis.set_major_locator(mdates.MonthLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+        
+        # Customize grid for dark theme
+        ax.grid(True, linestyle='--', alpha=0.2, color='white', zorder=0)
+        
+        # Add colorbar for time progression with improved labels
+        cbar = plt.colorbar(scatter, ax=ax, pad=0.02)
+        cbar.set_label('Time Progression', fontsize=10, color='white')
+        cbar.ax.yaxis.set_tick_params(color='white')
+        cbar.ax.tick_params(labelcolor='white')
+        
+        # Update spines color
+        for spine in ax.spines.values():
+            spine.set_color('white')
+        
+        # Add legend with dark theme styling
+        legend = ax.legend(bbox_to_anchor=(1.15, 1),
+                         loc='upper left',
+                         fontsize=10,
+                         frameon=True,
+                         facecolor='#1a1a1a',
+                         edgecolor='white',
+                         shadow=True)
+        for text in legend.get_texts():
+            text.set_color('white')
+        
+        # Adjust layout
+        plt.tight_layout()
+        
+        # Return the figure and latest value
         return fig, latest_value
     def get_hull_condition(self, hull_roughness):
         if hull_roughness < 15:
