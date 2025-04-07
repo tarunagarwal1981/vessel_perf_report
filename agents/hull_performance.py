@@ -134,27 +134,26 @@ class HullPerformanceAgent:
         dates_sorted = df['date'].tolist()
         metric_values_sorted = df['value'].tolist()
         
-        # Create a color gradient based on the metric value and time
-        # Normalize from 0 to 50 for the color scale
+        # Create a color gradient based on time progression
         time_progress = [(d - min(dates_sorted)).total_seconds() / 86400 for d in dates_sorted]  # Days since first date
-        normalized_progress = [t / max(time_progress) * 50 if max(time_progress) > 0 else 25 for t in time_progress]
+        normalized_progress = [t / max(time_progress) * 100 if max(time_progress) > 0 else 50 for t in time_progress]
         
         # Create the figure with dark theme
         fig = go.Figure()
         
-        # Add background colored zones
+        # Add background colored zones with defined boundaries
         fig.add_shape(type="rect", x0=min(dates_sorted), x1=max(dates_sorted), y0=0, y1=15,
-                     fillcolor="rgba(0, 100, 0, 0.2)", line=dict(width=0), layer="below")
+                     fillcolor="rgba(0, 100, 0, 0.15)", line=dict(width=0), layer="below")
         fig.add_shape(type="rect", x0=min(dates_sorted), x1=max(dates_sorted), y0=15, y1=25,
-                     fillcolor="rgba(255, 165, 0, 0.2)", line=dict(width=0), layer="below")
-        fig.add_shape(type="rect", x0=min(dates_sorted), x1=max(dates_sorted), y0=25, y1=40,
-                     fillcolor="rgba(139, 0, 0, 0.2)", line=dict(width=0), layer="below")
+                     fillcolor="rgba(255, 165, 0, 0.15)", line=dict(width=0), layer="below")
+        fig.add_shape(type="rect", x0=min(dates_sorted), x1=max(dates_sorted), y0=25, y1=max(metric_values_sorted) * 1.1,
+                     fillcolor="rgba(139, 0, 0, 0.15)", line=dict(width=0), layer="below")
         
         # Add threshold lines
         fig.add_shape(type="line", x0=min(dates_sorted), x1=max(dates_sorted), y0=15, y1=15,
-                     line=dict(color="lime", width=2, dash="solid"))
+                     line=dict(color="#00ff00", width=1.5))
         fig.add_shape(type="line", x0=min(dates_sorted), x1=max(dates_sorted), y0=25, y1=25,
-                     line=dict(color="red", width=2, dash="solid"))
+                     line=dict(color="#ff0000", width=1.5))
         
         # Add scatter plot with dots colored by time progression
         fig.add_trace(go.Scatter(
@@ -162,17 +161,18 @@ class HullPerformanceAgent:
             y=metric_values_sorted,
             mode='markers',
             marker=dict(
-                size=12,
+                size=10,
                 color=normalized_progress,
-                colorscale='Viridis',
+                colorscale='Viridis',  # This gives a nice blue->green->yellow gradient
                 showscale=True,
                 colorbar=dict(
                     title="Time Progression",
-                    tickvals=[0, 25, 50],
+                    tickvals=[0, 50, 100],
                     ticktext=["Early", "Mid", "Recent"],
-                    thickness=15,
-                    len=0.7,
-                    y=0.7
+                    thickness=12,
+                    len=0.6,
+                    y=0.6,
+                    title_side='right'
                 ),
                 line=dict(width=1, color='white')
             ),
@@ -203,101 +203,99 @@ class HullPerformanceAgent:
                 x=x_line_dates,
                 y=y_line,
                 mode='lines',
-                line=dict(color='white', width=3),
+                line=dict(color='white', width=2),
                 name='Trend Line'
             ))
             
             # Get the latest value from the trend line
             latest_value = y_line[-1]
-            
-            # Calculate statistical summary
-            mean_value = np.mean(metric_values_sorted)
-            median_value = np.median(metric_values_sorted)
-            std_dev = np.std(metric_values_sorted)
-            trend_direction = "Improving" if slope < 0 else "Worsening"
-            
-            # Add statistical summary annotation
-            fig.add_annotation(
-                x=min(dates_sorted),
-                y=0,
-                text=f"<b>Statistical Summary</b><br>• Mean: {mean_value:.2f}%<br>• Median: {median_value:.2f}%<br>• Std Dev: {std_dev:.2f}<br>• Last Value: {latest_value:.2f}%<br>• Trend Direction: {trend_direction}",
-                showarrow=False,
-                font=dict(color="white", size=12),
-                bgcolor="rgba(0,0,0,0.7)",
-                bordercolor="white",
-                borderwidth=1,
-                borderpad=10,
-                align="left",
-                xanchor="left",
-                yanchor="bottom",
-                xshift=10,
-                yshift=10
-            )
         
-        # Update layout for a professional dark theme
+        # Add custom legend for zone colors at the top
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers', marker=dict(size=0),
+            name="Good Zone", line=dict(color="#00ff00", width=4)
+        ))
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers', marker=dict(size=0),
+            name="Average Zone", line=dict(color="#ffa500", width=4)
+        ))
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers', marker=dict(size=0),
+            name="Poor Zone", line=dict(color="#ff0000", width=4)
+        ))
+        
+        # Update layout for a clean, crisp dark theme
         fig.update_layout(
             title=dict(
                 text=chart_title,
-                font=dict(size=24, color='white')
+                font=dict(size=22, color='white', family="Arial, sans-serif"),
+                x=0.01,
+                y=0.97,
+                xanchor='left',
+                yanchor='top'
             ),
             xaxis=dict(
                 title="Date",
                 showgrid=True,
                 gridcolor="rgba(255, 255, 255, 0.1)",
                 tickangle=-45,
-                tickfont=dict(size=12)
+                tickfont=dict(size=10, family="Arial, sans-serif"),
+                zeroline=False,
+                title_font=dict(size=12, family="Arial, sans-serif"),
+                tickformat="%b-%Y"
             ),
             yaxis=dict(
                 title=y_axis_title,
                 showgrid=True,
                 gridcolor="rgba(255, 255, 255, 0.1)",
-                range=[0, max(metric_values) * 1.1]
+                range=[0, max(max(metric_values_sorted) * 1.1, 25 * 1.5)],
+                zeroline=False,
+                title_font=dict(size=12, family="Arial, sans-serif"),
+                tickfont=dict(size=10, family="Arial, sans-serif")
             ),
-            plot_bgcolor="rgb(20, 20, 20)",
-            paper_bgcolor="rgb(20, 20, 20)",
-            font=dict(color="white"),
-            height=600,
+            plot_bgcolor="rgb(0, 0, 0)",
+            paper_bgcolor="rgb(0, 0, 0)",
+            font=dict(color="white", family="Arial, sans-serif"),
+            height=550,
+            margin=dict(t=80, b=60, l=80, r=40),
             legend=dict(
                 orientation="h",
                 yanchor="top",
-                y=1.05,
+                y=1.14,
                 xanchor="right",
                 x=1,
-                bgcolor="rgba(0,0,0,0.5)"
+                bgcolor="rgba(0,0,0,0)",
+                font=dict(size=10)
             ),
-            margin=dict(t=80, b=80, l=80, r=40)
+            hovermode="closest",
+            hoverlabel=dict(
+                bgcolor="rgba(0,0,0,0.8)",
+                font_size=12,
+                font_family="Arial, sans-serif"
+            )
         )
         
-        # Add legend for colored zones
-        fig.add_trace(go.Scatter(
-            x=[None], y=[None], mode='markers',
-            marker=dict(size=1, color="rgba(0,0,0,0)"),
-            name="Good Zone", 
-            legendgroup="zones"
-        ))
-        fig.add_trace(go.Scatter(
-            x=[None], y=[None], mode='markers',
-            marker=dict(size=1, color="rgba(0,0,0,0)"),
-            name="Average Zone",
-            legendgroup="zones" 
-        ))
-        fig.add_trace(go.Scatter(
-            x=[None], y=[None], mode='markers',
-            marker=dict(size=1, color="rgba(0,0,0,0)"),
-            name="Poor Zone",
-            legendgroup="zones" 
-        ))
+        # Add hover template for better information display
+        fig.update_traces(
+            hovertemplate="<b>Date</b>: %{x|%d %b %Y}<br><b>" + y_axis_title + "</b>: %{y:.2f}%<br>",
+            selector=dict(name='Performance Data')
+        )
         
-        # Add shapes for the legend items
-        fig.add_shape(type="line", xref="paper", yref="paper", 
-                      x0=0.89, y0=1.08, x1=0.91, y1=1.08,
-                      line=dict(color="lime", width=2))
-        fig.add_shape(type="line", xref="paper", yref="paper", 
-                      x0=0.71, y0=1.08, x1=0.73, y1=1.08,
-                      line=dict(color="orange", width=2))
-        fig.add_shape(type="line", xref="paper", yref="paper", 
-                      x0=0.52, y0=1.08, x1=0.54, y1=1.08,
-                      line=dict(color="red", width=2))
+        # Custom axis and grid adjustments for a cleaner look
+        fig.update_xaxes(
+            mirror=False,
+            ticks='outside',
+            showline=True,
+            linecolor='rgba(255, 255, 255, 0.3)',
+            nticks=8
+        )
+        fig.update_yaxes(
+            mirror=False,
+            ticks='outside',
+            showline=True,
+            linecolor='rgba(255, 255, 255, 0.3)',
+            nticks=10
+        )
         
         return fig, latest_value
     def get_hull_condition(self, hull_roughness):
