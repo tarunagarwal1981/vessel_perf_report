@@ -213,8 +213,10 @@ class HullPerformanceAgent:
                 y=0.93
             ),
             xaxis=dict(
-                title='Date',
-                titlefont=dict(size=18, family='Arial', color='#2a2a2a'),
+                title=dict(
+                    text='Date',
+                    font=dict(size=18, family='Arial', color='#2a2a2a')
+                ),
                 tickfont=dict(size=14, color='#2a2a2a'),
                 gridcolor='lightgrey',
                 showgrid=True,
@@ -222,15 +224,17 @@ class HullPerformanceAgent:
                 mirror=True
             ),
             yaxis=dict(
-                title=y_axis_title,
-                titlefont=dict(size=18, family='Arial', color='#2a2a2a'),
+                title=dict(
+                    text=y_axis_title,
+                    font=dict(size=18, family='Arial', color='#2a2a2a')
+                ),
                 tickfont=dict(size=14, color='#2a2a2a'),
                 gridcolor='lightgrey',
                 showgrid=True,
                 zeroline=False,
                 linecolor='#2a2a2a',
                 mirror=True,
-                range=[0, max(df[metric_name].max() * 1.2, 40)]  # Cap at 40% if needed
+                range=[0, max(df[metric_name].max() * 1.2, 40)]
             ),
             legend=dict(
                 orientation='h',
