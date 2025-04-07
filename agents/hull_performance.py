@@ -152,6 +152,7 @@ class HullPerformanceAgent:
                 size=8,
                 color='#1f77b4',
                 line=dict(width=1, color='DarkSlateGrey')
+            )     
         ))
 
         # Add trend line if enough data points
