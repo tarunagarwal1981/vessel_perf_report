@@ -121,87 +121,185 @@ class HullPerformanceAgent:
                 st.info("No valid hull roughness speed loss data available for the selected filters.")
     
     def create_performance_chart(self, data, metric_name, chart_title, y_axis_title):
-        """Create chart using Altair which has first-class support in Streamlit"""
         if not data:
             return None, None
         
-        import altair as alt
-        import pandas as pd
-        import numpy as np
+        # Prepare data - ensure dates are in datetime format
+        dates = [pd.to_datetime(row['report_date']) for row in data]
+        metric_values = [row.get(metric_name, 0) for row in data]
         
-        # Prepare data
-        df = pd.DataFrame({
-            'date': [pd.to_datetime(row['report_date']) for row in data],
-            'value': [row.get(metric_name, 0) for row in data]
-        })
-        
-        # Sort by date
+        # Sort data by date for proper trend line
+        df = pd.DataFrame({'date': dates, 'value': metric_values})
         df = df.sort_values('date')
+        dates_sorted = df['date'].tolist()
+        metric_values_sorted = df['value'].tolist()
         
-        # Calculate trend
-        if len(df) > 1:
-            # Add day number column for regression
-            df['day'] = (df['date'] - df['date'].min()).dt.total_seconds() / (24 * 3600)
+        # Create a color gradient based on the metric value and time
+        # Normalize from 0 to 50 for the color scale
+        time_progress = [(d - min(dates_sorted)).total_seconds() / 86400 for d in dates_sorted]  # Days since first date
+        normalized_progress = [t / max(time_progress) * 50 if max(time_progress) > 0 else 25 for t in time_progress]
+        
+        # Create the figure with dark theme
+        fig = go.Figure()
+        
+        # Add background colored zones
+        fig.add_shape(type="rect", x0=min(dates_sorted), x1=max(dates_sorted), y0=0, y1=15,
+                     fillcolor="rgba(0, 100, 0, 0.2)", line=dict(width=0), layer="below")
+        fig.add_shape(type="rect", x0=min(dates_sorted), x1=max(dates_sorted), y0=15, y1=25,
+                     fillcolor="rgba(255, 165, 0, 0.2)", line=dict(width=0), layer="below")
+        fig.add_shape(type="rect", x0=min(dates_sorted), x1=max(dates_sorted), y0=25, y1=40,
+                     fillcolor="rgba(139, 0, 0, 0.2)", line=dict(width=0), layer="below")
+        
+        # Add threshold lines
+        fig.add_shape(type="line", x0=min(dates_sorted), x1=max(dates_sorted), y0=15, y1=15,
+                     line=dict(color="lime", width=2, dash="solid"))
+        fig.add_shape(type="line", x0=min(dates_sorted), x1=max(dates_sorted), y0=25, y1=25,
+                     line=dict(color="red", width=2, dash="solid"))
+        
+        # Add scatter plot with dots colored by time progression
+        fig.add_trace(go.Scatter(
+            x=dates_sorted,
+            y=metric_values_sorted,
+            mode='markers',
+            marker=dict(
+                size=12,
+                color=normalized_progress,
+                colorscale='Viridis',
+                showscale=True,
+                colorbar=dict(
+                    title="Time Progression",
+                    tickvals=[0, 25, 50],
+                    ticktext=["Early", "Mid", "Recent"],
+                    thickness=15,
+                    len=0.7,
+                    y=0.7
+                ),
+                line=dict(width=1, color='white')
+            ),
+            name='Performance Data'
+        ))
+        
+        # Calculate linear best fit if we have enough data points
+        latest_value = None
+        if len(dates_sorted) > 1:
+            # Convert dates to numeric for fitting
+            x_numeric = np.array([(d - dates_sorted[0]).total_seconds() / 86400 for d in dates_sorted])
+            y = np.array(metric_values_sorted)
             
-            # Calculate trend line
-            x = df['day']
-            y = df['value']
-            coeffs = np.polyfit(x, y, 1)
+            # Fit a line
+            coeffs = np.polyfit(x_numeric, y, 1)
+            slope = coeffs[0]
+            intercept = coeffs[1]
             
-            # Generate trend line points
-            df_trend = pd.DataFrame({
-                'date': [df['date'].min(), df['date'].max()],
-                'value': [
-                    coeffs[1] + coeffs[0] * df['day'].min(),
-                    coeffs[1] + coeffs[0] * df['day'].max()
-                ],
-                'type': 'Trend Line'
-            })
+            # Generate points for the trend line
+            x_line = np.array([0, x_numeric[-1]])
+            y_line = slope * x_line + intercept
             
-            # Get latest value from trend
-            latest_value = df_trend['value'].iloc[-1]
-        else:
-            latest_value = df['value'].iloc[-1] if not df.empty else None
-        
-        # Create base chart
-        base = alt.Chart(df).encode(
-            x=alt.X('date:T', title='Date', axis=alt.Axis(format='%b %Y', labelAngle=-45))
-        )
-        
-        # Create the main chart with points
-        points = base.mark_circle(size=100).encode(
-            y=alt.Y('value:Q', title=y_axis_title),
-            color=alt.Color('date:T', 
-                           scale=alt.Scale(scheme='viridis'),
-                           legend=alt.Legend(title='Time Progression')),
-            tooltip=['date:T', alt.Tooltip('value:Q', title='Value', format='.2f')]
-        )
-        
-        if len(df) > 1:
-            # Add trend line
-            trend = alt.Chart(df_trend).mark_line(color='red', strokeWidth=3).encode(
-                x='date:T',
-                y='value:Q'
+            # Convert back to datetime for plotting
+            x_line_dates = [dates_sorted[0] + datetime.timedelta(days=float(x)) for x in x_line]
+            
+            # Add the best fit line
+            fig.add_trace(go.Scatter(
+                x=x_line_dates,
+                y=y_line,
+                mode='lines',
+                line=dict(color='white', width=3),
+                name='Trend Line'
+            ))
+            
+            # Get the latest value from the trend line
+            latest_value = y_line[-1]
+            
+            # Calculate statistical summary
+            mean_value = np.mean(metric_values_sorted)
+            median_value = np.median(metric_values_sorted)
+            std_dev = np.std(metric_values_sorted)
+            trend_direction = "Improving" if slope < 0 else "Worsening"
+            
+            # Add statistical summary annotation
+            fig.add_annotation(
+                x=min(dates_sorted),
+                y=0,
+                text=f"<b>Statistical Summary</b><br>• Mean: {mean_value:.2f}%<br>• Median: {median_value:.2f}%<br>• Std Dev: {std_dev:.2f}<br>• Last Value: {latest_value:.2f}%<br>• Trend Direction: {trend_direction}",
+                showarrow=False,
+                font=dict(color="white", size=12),
+                bgcolor="rgba(0,0,0,0.7)",
+                bordercolor="white",
+                borderwidth=1,
+                borderpad=10,
+                align="left",
+                xanchor="left",
+                yanchor="bottom",
+                xshift=10,
+                yshift=10
             )
-            
-            # Combine points and trend
-            chart = points + trend
-        else:
-            chart = points
         
-        # Apply styling
-        chart = chart.properties(
-            title=chart_title,
-            width=800,
-            height=500
-        ).configure_view(
-            stroke='lightgray'
+        # Update layout for a professional dark theme
+        fig.update_layout(
+            title=dict(
+                text=chart_title,
+                font=dict(size=24, color='white')
+            ),
+            xaxis=dict(
+                title="Date",
+                showgrid=True,
+                gridcolor="rgba(255, 255, 255, 0.1)",
+                tickangle=-45,
+                tickfont=dict(size=12)
+            ),
+            yaxis=dict(
+                title=y_axis_title,
+                showgrid=True,
+                gridcolor="rgba(255, 255, 255, 0.1)",
+                range=[0, max(metric_values) * 1.1]
+            ),
+            plot_bgcolor="rgb(20, 20, 20)",
+            paper_bgcolor="rgb(20, 20, 20)",
+            font=dict(color="white"),
+            height=600,
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=1.05,
+                xanchor="right",
+                x=1,
+                bgcolor="rgba(0,0,0,0.5)"
+            ),
+            margin=dict(t=80, b=80, l=80, r=40)
         )
         
-        # Return the chart and latest value
-        # For Streamlit, we return the Altair chart directly
-        # For report generator, we'll need to handle conversion separately
-        return chart, latest_value
+        # Add legend for colored zones
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers',
+            marker=dict(size=1, color="rgba(0,0,0,0)"),
+            name="Good Zone", 
+            legendgroup="zones"
+        ))
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers',
+            marker=dict(size=1, color="rgba(0,0,0,0)"),
+            name="Average Zone",
+            legendgroup="zones" 
+        ))
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers',
+            marker=dict(size=1, color="rgba(0,0,0,0)"),
+            name="Poor Zone",
+            legendgroup="zones" 
+        ))
+        
+        # Add shapes for the legend items
+        fig.add_shape(type="line", xref="paper", yref="paper", 
+                      x0=0.89, y0=1.08, x1=0.91, y1=1.08,
+                      line=dict(color="lime", width=2))
+        fig.add_shape(type="line", xref="paper", yref="paper", 
+                      x0=0.71, y0=1.08, x1=0.73, y1=1.08,
+                      line=dict(color="orange", width=2))
+        fig.add_shape(type="line", xref="paper", yref="paper", 
+                      x0=0.52, y0=1.08, x1=0.54, y1=1.08,
+                      line=dict(color="red", width=2))
+        
+        return fig, latest_value
     def get_hull_condition(self, hull_roughness):
         if hull_roughness < 15:
             return "GOOD", "green"
