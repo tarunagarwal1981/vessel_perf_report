@@ -122,72 +122,102 @@ class HullPerformanceAgent:
     
     def create_performance_chart(self, data, metric_name, chart_title, y_axis_title):
         """
-        Create a publication-quality hull performance chart with neon effects and dark theme
+        Create a hull performance chart using the provided styling with fixed background and size
         """
         if not data:
             return None, None
-    
+        
         import matplotlib.pyplot as plt
-        import matplotlib.dates as mdates
         import numpy as np
+        import pandas as pd
+        import matplotlib.dates as mdates
         from matplotlib.gridspec import GridSpec
         import matplotlib.patheffects as path_effects
         from matplotlib.colors import LinearSegmentedColormap
         from matplotlib.collections import LineCollection
-    
-        # Set the style for publication quality
-        plt.style.use('default')  # Reset to default style
-        plt.rcParams['figure.dpi'] = 300
-        plt.rcParams['font.family'] = 'sans-serif'
-        plt.rcParams['font.sans-serif'] = ['Arial']
-        plt.rcParams['axes.linewidth'] = 1.2
-    
+        
         # Prepare data
         dates = [pd.to_datetime(row['report_date']) for row in data]
         metric_values = [row.get(metric_name, 0) for row in data]
-        dates_num = mdates.date2num(dates)
-    
-        # Create figure with dark background
-        fig = plt.figure(figsize=(12, 8))
+        
+        # Sort data by date
+        sorted_indices = np.argsort(dates)
+        dates = [dates[i] for i in sorted_indices]
+        metric_values = [metric_values[i] for i in sorted_indices]
+        
+        # Set the style for publication quality
+        plt.rcParams['figure.dpi'] = 300
+        plt.rcParams['font.family'] = 'sans-serif'
+        plt.rcParams['axes.linewidth'] = 1.2
+        
+        # Create figure with dark background - increased figure size 
+        fig = plt.figure(figsize=(16, 12))
+        # Explicitly set the figure facecolor
         fig.patch.set_facecolor('#1a1a1a')
-    
-        # Create subplot with GridSpec
-        gs = GridSpec(2, 1, height_ratios=[4, 1], hspace=0.3)
-        ax1 = plt.subplot(gs[0])
+        
+        # Add padding to ensure the full chart is visible
+        fig.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
+        
+        # Create GridSpec for layout
+        gs = GridSpec(2, 1, height_ratios=[4, 1], hspace=0.3, figure=fig)
+        
+        # Main plot - explicitly set axes with GridSpec
+        ax1 = fig.add_subplot(gs[0])
         ax1.set_facecolor('#1a1a1a')
-    
-        # Calculate trend line
-        z = np.polyfit(dates_num, metric_values, 1)
-        p = np.poly1d(z)
-        trend_line = p(dates_num)
-        latest_value = trend_line[-1] if len(trend_line) > 0 else None
-    
-        # Create neon color gradient
-        neon_colors = ['#FF00FF', '#00FF00', '#00FFFF', '#FF0099', '#7F00FF']
-        cmap = LinearSegmentedColormap.from_list('neon', neon_colors)
-    
-        # Create zone backgrounds
+        
+        # Create subtle zone backgrounds
         zones = [
             (0, 15, '#004400', 'Good Zone'),
             (15, 25, '#443300', 'Average Zone'),
             (25, 40, '#440000', 'Poor Zone')
         ]
-    
+        
         for start, end, color, label in zones:
             ax1.axhspan(start, end, color=color, alpha=0.3, label=label)
-    
-        # Add trend line with enhanced glow effect
+        
+        # Calculate trend line
+        dates_num = mdates.date2num(dates)
+        z = np.polyfit(dates_num, metric_values, 1)
+        p = np.poly1d(z)
+        trend_line = p(dates_num)
+        
+        # Get latest value from trend line
+        latest_value = trend_line[-1] if len(trend_line) > 0 else None
+        
+        # Create neon color gradient for time-based coloring
+        neon_colors = [
+            '#FF00FF',  # Neon Pink
+            '#00FF00',  # Neon Green
+            '#00FFFF',  # Neon Cyan
+            '#FF0099',  # Neon Magenta
+            '#7F00FF'   # Neon Purple
+        ]
+        
+        # Create custom colormap for the neon effect
+        cmap = LinearSegmentedColormap.from_list('neon', neon_colors)
+        
+        # Add trend line with glow effect
         # Outer glow
-        ax1.plot(dates, trend_line, color='white', linewidth=8, alpha=0.1, zorder=2)
+        ax1.plot(dates, trend_line, 
+                 color='white', 
+                 linewidth=8, 
+                 alpha=0.1, 
+                 zorder=2)
+        
         # Inner glow
-        ax1.plot(dates, trend_line, color='white', linewidth=4, alpha=0.2, zorder=3)
-        # Main line with gradient
+        ax1.plot(dates, trend_line, 
+                 color='white', 
+                 linewidth=4, 
+                 alpha=0.2, 
+                 zorder=3)
+        
+        # Main line with gradient color
         points = np.array([dates_num, trend_line]).T.reshape(-1, 1, 2)
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
         lc = LineCollection(segments, cmap=cmap, linewidth=2)
         lc.set_array(np.linspace(0, 1, len(dates)))
         ax1.add_collection(lc)
-    
+        
         # Add threshold lines with neon glow
         for threshold, color, label in [(15, '#00FF00', 'Good/Average Threshold'),
                                        (25, '#FF0000', 'Average/Poor Threshold')]:
@@ -198,30 +228,30 @@ class HullPerformanceAgent:
             ax1.axhline(y=threshold, color=color, linestyle='-',
                         alpha=0.4, linewidth=2, zorder=2)
             # Main line
-            ax1.axhline(y=threshold, color=color, linestyle='-',
-                        alpha=0.8, linewidth=1, label=label,
-                        path_effects=[path_effects.SimpleLineShadow(offset=(0, 0),
-                                                                  alpha=0.2),
-                                    path_effects.Normal()],
-                        zorder=3)
-    
+            line = ax1.axhline(y=threshold, color=color, linestyle='-',
+                               alpha=0.8, linewidth=1, label=label,
+                               path_effects=[path_effects.SimpleLineShadow(offset=(0, 0),
+                                                                         alpha=0.2),
+                                           path_effects.Normal()],
+                               zorder=3)
+        
         # Plot scatter points with enhanced neon glow effect
         # Outer glow
         ax1.scatter(dates, metric_values,
-                    c=np.arange(len(dates)),
-                    cmap=cmap,
-                    s=200,
-                    alpha=0.1,
-                    zorder=4)
-    
+                   c=np.arange(len(dates)),
+                   cmap=cmap,
+                   s=200,
+                   alpha=0.1,
+                   zorder=4)
+        
         # Middle glow
         ax1.scatter(dates, metric_values,
-                    c=np.arange(len(dates)),
-                    cmap=cmap,
-                    s=150,
-                    alpha=0.2,
-                    zorder=5)
-    
+                   c=np.arange(len(dates)),
+                   cmap=cmap,
+                   s=150,
+                   alpha=0.2,
+                   zorder=5)
+        
         # Main points
         scatter = ax1.scatter(dates, metric_values,
                              c=np.arange(len(dates)),
@@ -232,48 +262,49 @@ class HullPerformanceAgent:
                              linewidth=1,
                              label='Performance Data',
                              zorder=6)
-    
+        
         # Inner highlight
         ax1.scatter(dates, metric_values,
-                    c='white',
-                    s=30,
-                    alpha=0.5,
-                    zorder=7)
-    
+                   c='white',
+                   s=30,
+                   alpha=0.5,
+                   zorder=7)
+        
         # Styling for dark theme
-        title = ax1.set_title(chart_title,
-                             fontsize=16,
-                             pad=20,
-                             fontweight='bold',
-                             color='white')
+        title_text = chart_title or 'Hull Performance Analysis'
+        title = ax1.set_title(title_text,
+                              fontsize=16,
+                              pad=20,
+                              fontweight='bold',
+                              color='white')
         title.set_path_effects([path_effects.SimpleLineShadow(offset=(2, 2),
                                                              alpha=0.3),
                                path_effects.Normal()])
-    
+        
         ax1.set_xlabel('Date', fontsize=12, labelpad=10, color='white')
-        ax1.set_ylabel(y_axis_title, fontsize=12, labelpad=10, color='white')
-    
+        ax1.set_ylabel(y_axis_title or 'Performance Metric (%)', fontsize=12, labelpad=10, color='white')
+        
         # Format axes
         ax1.tick_params(axis='both', which='major', labelsize=10, colors='white')
         ax1.xaxis.set_major_locator(mdates.MonthLocator())
         ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
         plt.setp(ax1.get_xticklabels(), rotation=45, ha='right')
-    
-        # Customize grid
+        
+        # Customize grid for dark theme
         ax1.grid(True, linestyle='--', alpha=0.2, color='white', zorder=0)
-    
-        # Add colorbar
+        
+        # Add colorbar for time progression
         cbar = plt.colorbar(scatter, ax=ax1, pad=0.02)
         cbar.set_label('Time Progression', fontsize=10, color='white')
         cbar.ax.yaxis.set_tick_params(color='white')
         cbar.ax.tick_params(labelcolor='white')
-    
+        
         # Update spines color
         for spine in ax1.spines.values():
             spine.set_color('white')
-    
+        
         # Add legend with dark theme styling
-        legend = ax1.legend(bbox_to_anchor=(1.15, 1),
+        legend = ax1.legend(bbox_to_anchor=(1.05, 1),
                            loc='upper left',
                            fontsize=10,
                            frameon=True,
@@ -282,44 +313,41 @@ class HullPerformanceAgent:
                            shadow=True)
         for text in legend.get_texts():
             text.set_color('white')
-    
-        # Add statistics subplot
-        ax2 = plt.subplot(gs[1])
+        
+        # Add statistics subplot with dark theme styling but simplified
+        ax2 = fig.add_subplot(gs[1])
         ax2.set_facecolor('#1a1a1a')
-        stats_text = f"""
-        Statistical Summary:
-        • Mean: {np.mean(metric_values):.2f}%
-        • Median: {np.median(metric_values):.2f}%
-        • Std Dev: {np.std(metric_values):.2f}%
-        • Latest Value: {metric_values[-1]:.2f}%
-        • Trend Direction: {'Improving' if z[0] < 0 else 'Degrading'}
-        """
-    
-        # Add stats box with dark theme
-        stats = ax2.text(0.05, 0.5, stats_text,
+        
+        # Instead of stats, just add a note about the trend
+        if z[0] < 0:
+            trend_direction = "Improving (Decreasing)"
+            trend_color = "#00FF00"  # Green for improvement
+        else:
+            trend_direction = "Degrading (Increasing)"
+            trend_color = "#FF0000"  # Red for degradation
+        
+        trend_text = f"Trend Direction: {trend_direction}"
+        
+        # Add trend info box with dark theme
+        trend_info = ax2.text(0.05, 0.5, trend_text,
                          transform=ax2.transAxes,
                          bbox=dict(facecolor='#1a1a1a',
-                                  edgecolor='white',
+                                  edgecolor=trend_color,
                                   alpha=0.8,
                                   boxstyle='round,pad=1'),
-                         fontsize=10,
-                         color='white',
+                         fontsize=12,
+                         color=trend_color,
                          verticalalignment='center')
         ax2.axis('off')
-    
-        # Adjust layout
+        
+        # Adjust layout - make sure to capture all elements
         plt.tight_layout()
-    
-        # Save with high DPI and dark background
-        if st._is_running_with_streamlit:
-            st.pyplot(fig)
-        else:
-            plt.savefig('hull_performance_dark.png',
-                        dpi=300,
-                        bbox_inches='tight',
-                        facecolor='#1a1a1a',
-                        edgecolor='none')
-    
+        
+        # Make sure the background color is preserved when saving
+        # This is crucial for Word document integration
+        plt.savefig('temp.png', facecolor='#1a1a1a', bbox_inches='tight')
+        
+        # Return the figure and latest value
         return fig, latest_value
     def get_hull_condition(self, hull_roughness):
         if hull_roughness < 15:
