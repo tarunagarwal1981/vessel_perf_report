@@ -10,8 +10,9 @@ os.environ['STREAMLIT_LOG_LEVEL'] = 'debug'
 # Import the agents
 from agents.hull_performance import HullPerformanceAgent
 from agents.speed_consumption import SpeedConsumptionAgent
+from agents.speed_consumption_table import SpeedConsumptionTableAgent  # Import the new Table Agent
 from agents.advanced_report import AdvancedReportGenerator
-from agents.cii_agent import CIIAgent  # Import the new CII Agent
+from agents.cii_agent import CIIAgent
 from utils.data_fetcher import fetch_data_from_lambda
 
 # Initialize session state for persistence
@@ -140,17 +141,19 @@ else:
     if st.session_state.analysis_completed and st.session_state.vessel_data:
         try:
             # Create main tabs for different analysis types
-            main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
+            main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
                 "Hull Performance", 
-                "Speed-Consumption Analysis", 
-                "CII Analysis",  # New CII tab
+                "Speed-Consumption Analysis",
+                "Speed-Consumption Table",  # New tab for the table agent
+                "CII Analysis",
                 "Generate Report"
             ])
             
             # Initialize the agents
             hull_agent = HullPerformanceAgent()
             speed_agent = SpeedConsumptionAgent()
-            cii_agent = CIIAgent()  # Initialize new CII Agent
+            speed_table_agent = SpeedConsumptionTableAgent()  # Initialize the new table agent
+            cii_agent = CIIAgent()
             report_agent = AdvancedReportGenerator()
             
             # Hull Performance Tab
@@ -161,14 +164,18 @@ else:
             with main_tab2:
                 speed_agent.run(st.session_state.vessel_data, st.session_state.selected_vessel)
             
-            # CII Analysis Tab
+            # Speed-Consumption Table Tab
             with main_tab3:
+                speed_table_agent.run(st.session_state.vessel_data, st.session_state.selected_vessel)
+            
+            # CII Analysis Tab
+            with main_tab4:
                 # Use CII data if available, otherwise use hull performance data
                 data_for_cii = st.session_state.cii_data if st.session_state.cii_data else st.session_state.vessel_data
                 cii_agent.run(data_for_cii, st.session_state.selected_vessel)
             
             # Report Generator Tab
-            with main_tab4:
+            with main_tab5:
                 report_agent.run(
                     st.session_state.vessel_data, 
                     st.session_state.selected_vessel, 
